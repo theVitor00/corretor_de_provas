@@ -406,7 +406,7 @@ class ExamsTab(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(6, 420)
+        self.table.setColumnWidth(6, 440)
 
         l_hist.addWidget(self.table)
         layout.addWidget(gb_history)
@@ -432,27 +432,28 @@ class ExamsTab(QWidget):
             btn_layout.setContentsMargins(4, 2, 4, 2)
             btn_layout.setSpacing(6)
 
-            btn_proc = QPushButton("Processar .DAT")
+            btn_proc = QPushButton("Processar")
             btn_proc.setIcon(qta.icon('fa5s.cogs', color='white'))
             btn_proc.setObjectName("btnNavy")
-            btn_proc.setMinimumWidth(115)
+            btn_proc.setMinimumWidth(100)
             btn_proc.clicked.connect(lambda _, e_id=e["id"]: self.process_exam(e_id))
 
             btn_res = QPushButton("Resultados")
             btn_res.setIcon(qta.icon('fa5s.chart-line', color='#242D64'))
             btn_res.setObjectName("btnSecondary")
-            btn_res.setMinimumWidth(95)
+            btn_res.setMinimumWidth(105)
             btn_res.clicked.connect(lambda _, e_id=e["id"]: self.view_results(e_id))
 
             btn_edit = QPushButton("Editar")
             btn_edit.setIcon(qta.icon('fa5s.edit', color='#242D64'))
-            btn_edit.setMinimumWidth(75)
+            btn_edit.setObjectName("btnSecondary")
+            btn_edit.setMinimumWidth(85)
             btn_edit.clicked.connect(lambda _, e_data=e: self.edit_exam(e_data))
 
             btn_del = QPushButton("Excluir")
             btn_del.setIcon(qta.icon('fa5s.trash-alt', color='white'))
             btn_del.setObjectName("btnDanger")
-            btn_del.setMinimumWidth(75)
+            btn_del.setMinimumWidth(85)
             btn_del.clicked.connect(lambda _, e_id=e["id"], e_nome=e["nome"]: self.delete_exam(e_id, e_nome))
 
             btn_layout.addWidget(btn_proc)
