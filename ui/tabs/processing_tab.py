@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QFileDialog,
     QDialog, QFormLayout, QMessageBox, QGroupBox, QProgressBar,
-    QRadioButton, QButtonGroup
+    QRadioButton, QButtonGroup, QScrollArea
 )
 from PyQt6.QtCore import Qt
 from models.exam import ExamModel
@@ -24,7 +24,7 @@ class DuplicateStudentDialog(QDialog):
         self.selected_item = duplicate_items[0]
         self.setWindowTitle(f"Duplicata Detectada - Matrícula {matricula}")
         self.setWindowIcon(qta.icon('fa5s.copy', color='#EF4444'))
-        self.resize(680, 380)
+        self.resize(640, 320)
         self.init_ui()
 
     def init_ui(self):
@@ -32,9 +32,8 @@ class DuplicateStudentDialog(QDialog):
 
         info_lbl = QLabel(
             f"<b>Atenção: Duplicata de Aluno no Arquivo de Respostas!</b><br>"
-            f"A matrícula <b>'{self.matricula}'</b> foi encontrada <b>{len(self.duplicate_items)} vezes</b> no arquivo .DAT enviado.<br>"
-            "Só deve haver uma única entrada por aluno. Por favor, compare as ocorrências abaixo e escolha qual deseja <b>MANTER</b>.<br>"
-            "A(s) outra(s) linha(s) duplicada(s) será(ão) excluída(s) do processamento."
+            f"A matrícula <b>'{self.matricula}'</b> foi encontrada <b>{len(self.duplicate_items)} vezes</b> no arquivo enviado.<br>"
+            "Escolha qual ocorrência deseja <b>MANTER</b>. A(s) outra(s) será(ão) descartada(s)."
         )
         info_lbl.setWordWrap(True)
         layout.addWidget(info_lbl)
@@ -42,7 +41,7 @@ class DuplicateStudentDialog(QDialog):
         table = QTableWidget()
         table.setColumnCount(4)
         table.setHorizontalHeaderLabels(["Seleção", "Linha #", "Tipo Prova", "Respostas Registradas"])
-        table.verticalHeader().setDefaultSectionSize(40)
+        table.verticalHeader().setDefaultSectionSize(32)
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -83,7 +82,7 @@ class DuplicateStudentDialog(QDialog):
 
 class HeaderFixDialog(QDialog):
     """
-    Diálogo para correção manual de dados de cabeçalho (quando aluno[0..2] != 000 ou há inconsistências)
+    Diálogo para correção manual de dados de cabeçalho
     """
     def __init__(self, raw_item: dict, known_types: list, parent=None):
         super().__init__(parent)
@@ -91,7 +90,7 @@ class HeaderFixDialog(QDialog):
         self.known_types = known_types
         self.setWindowTitle(f"Revisar Linha {raw_item['line_number']} - Código de Controle Inválido")
         self.setWindowIcon(qta.icon('fa5s.exclamation-triangle', color='#EF4444'))
-        self.resize(440, 240)
+        self.resize(440, 220)
         self.init_ui()
 
     def init_ui(self):
@@ -99,7 +98,7 @@ class HeaderFixDialog(QDialog):
 
         info_lbl = QLabel(
             f"<b>Aviso de Leitura:</b> O código de controle inicial de 3 dígitos lido foi <b>'{self.raw_item['control']}'</b> (Esperado '000').\n"
-            "Por favor, ajuste manualmente os dados obrigatórios para garantir a leitura correta."
+            "Ajuste manualmente os dados para validação."
         )
         info_lbl.setWordWrap(True)
         layout.addWidget(info_lbl)
@@ -162,36 +161,35 @@ class ProcessingTab(QWidget):
         self.processing_model = ProcessingModel()
         self.on_view_results_request = on_view_results_request
         self.selected_exam_id = None
-        self.dat_filepath = None
+        self.dat_file_paths = {} # {parte_num: filepath}
+        self.partes_config = [] # list of partes
+        self.file_input_widgets = {} # {parte_num: (QLineEdit, QPushButton)}
         self.init_ui()
 
     def init_ui(self):
-        layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(4, 4, 4, 4)
 
-        # Exam & File Selection Group
-        gb_select = QGroupBox("1. Seleção da Prova e Arquivo .DAT de Respostas")
-        f_select = QFormLayout(gb_select)
+        # Envolver todo o conteúdo em QScrollArea para evitar corte de tela em baixas resoluções
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(10)
+
+        # Exam & Multi-File Selection Group
+        self.gb_select = QGroupBox("1. Seleção da Prova e Arquivo(s) .DAT de Respostas")
+        self.f_select = QFormLayout(self.gb_select)
 
         self.combo_exam = QComboBox()
         self.combo_exam.currentIndexChanged.connect(self.on_exam_changed)
+        self.f_select.addRow("Selecione a Prova *:", self.combo_exam)
 
-        h_file = QHBoxLayout()
-        self.txt_filepath = QLineEdit()
-        self.txt_filepath.setReadOnly(True)
-        self.txt_filepath.setPlaceholderText("Nenhum arquivo .dat selecionado...")
+        self.layout_file_inputs = QVBoxLayout()
+        self.f_select.addRow(self.layout_file_inputs)
 
-        btn_browse = QPushButton("Buscar Arquivo .DAT...")
-        btn_browse.setIcon(qta.icon('fa5s.folder-open', color='white'))
-        btn_browse.setObjectName("btnNavy")
-        btn_browse.clicked.connect(self.browse_dat_file)
-
-        h_file.addWidget(self.txt_filepath)
-        h_file.addWidget(btn_browse)
-
-        f_select.addRow("Selecione a Prova *:", self.combo_exam)
-        f_select.addRow("Arquivo de Respostas (.dat) *:", h_file)
-
-        layout.addWidget(gb_select)
+        layout.addWidget(self.gb_select)
 
         # Processing Actions & Progress
         gb_process = QGroupBox("2. Processamento e Validação do Controle 000")
@@ -213,12 +211,12 @@ class ProcessingTab(QWidget):
 
         l_process.addLayout(h_btn_proc)
 
-        self.lbl_status = QLabel("Aguardando arquivo para processamento...")
+        self.lbl_status = QLabel("Aguardando arquivo(s) para processamento...")
         l_process.addWidget(self.lbl_status)
 
         layout.addWidget(gb_process)
 
-        # Table of Control Errors / Warnings requiring manual review
+        # Table of Control Errors / Warnings
         gb_errors = QGroupBox("Revisão de Erros de Cabeçalho (Linhas onde aluno[0..2] != 000)")
         l_errors = QVBoxLayout(gb_errors)
 
@@ -227,17 +225,21 @@ class ProcessingTab(QWidget):
         self.tbl_errors.setHorizontalHeaderLabels([
             "Linha", "Linha Bruta", "Controle Lido", "Matrícula", "Tipo", "Ação"
         ])
-        self.tbl_errors.verticalHeader().setDefaultSectionSize(44)
+        self.tbl_errors.verticalHeader().setDefaultSectionSize(32)
+        self.tbl_errors.setMaximumHeight(180)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self.tbl_errors.setColumnWidth(5, 150)
+        self.tbl_errors.setColumnWidth(5, 140)
 
         l_errors.addWidget(self.tbl_errors)
         layout.addWidget(gb_errors)
+
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)
 
         self.load_exams_combo()
 
@@ -261,23 +263,74 @@ class ProcessingTab(QWidget):
     def on_exam_changed(self):
         self.selected_exam_id = self.combo_exam.currentData()
         self.btn_view_res.setEnabled(False)
+        self.dat_file_paths.clear()
+        self.file_input_widgets.clear()
+        self.clear_file_input_layout()
 
-    def browse_dat_file(self):
+        if not self.selected_exam_id:
+            return
+
+        exam = self.exam_model.get_exam_by_id(self.selected_exam_id)
+        if not exam:
+            return
+
+        partes = exam.get("layout_config", {}).get("partes", [])
+        if not partes:
+            tot_q = exam.get("num_questoes", 45)
+            partes = [{"parte_num": 1, "nome": "Parte Única", "num_questoes": tot_q, "q_start": 1, "q_end": tot_q}]
+
+        self.partes_config = partes
+
+        # Gerar dinamicamente seletores de arquivo por parte
+        for p in self.partes_config:
+            p_num = p["parte_num"]
+            p_nome = p["nome"]
+            q_st = p["q_start"]
+            q_ed = p["q_end"]
+
+            lbl = QLabel(f"<b>Arquivo .DAT - {p_nome} (Q{q_st} a Q{q_ed}):</b>")
+            txt = QLineEdit()
+            txt.setReadOnly(True)
+            txt.setPlaceholderText(f"Selecione o arquivo .dat para {p_nome}...")
+
+            btn = QPushButton("Buscar Arquivo .DAT...")
+            btn.setIcon(qta.icon('fa5s.folder-open', color='white'))
+            btn.setObjectName("btnNavy")
+            btn.clicked.connect(lambda _, pn=p_num: self.browse_dat_file_for_part(pn))
+
+            h = QHBoxLayout()
+            h.addWidget(txt)
+            h.addWidget(btn)
+
+            row_w = QWidget()
+            vl = QVBoxLayout(row_w)
+            vl.setContentsMargins(0, 2, 0, 4)
+            vl.addWidget(lbl)
+            vl.addLayout(h)
+
+            self.layout_file_inputs.addWidget(row_w)
+            self.file_input_widgets[p_num] = (txt, btn)
+
+    def clear_file_input_layout(self):
+        while self.layout_file_inputs.count():
+            item = self.layout_file_inputs.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+    def browse_dat_file_for_part(self, parte_num: int):
         filepath, _ = QFileDialog.getOpenFileName(
-            self, "Selecionar Arquivo .DAT de Respostas", "", "Arquivos DAT (*.dat);;Todos os Arquivos (*.*)"
+            self, f"Selecionar Arquivo .DAT para Parte {parte_num}", "", "Arquivos DAT (*.dat);;Todos os Arquivos (*.*)"
         )
         if filepath:
-            self.dat_filepath = filepath
-            self.txt_filepath.setText(filepath)
-            self.lbl_status.setText(f"Arquivo selecionado: {os.path.basename(filepath)}")
+            self.dat_file_paths[parte_num] = filepath
+            if parte_num in self.file_input_widgets:
+                self.file_input_widgets[parte_num][0].setText(filepath)
+            self.lbl_status.setText(f"Arquivo Parte {parte_num} selecionado: {os.path.basename(filepath)}")
 
     def process_dat_file(self):
         if not self.selected_exam_id:
             QMessageBox.warning(self, "Aviso", "Selecione uma prova antes de processar.")
-            return
-
-        if not self.dat_filepath or not os.path.exists(self.dat_filepath):
-            QMessageBox.warning(self, "Aviso", "Selecione um arquivo .dat válido.")
             return
 
         exam = self.exam_model.get_exam_by_id(self.selected_exam_id)
@@ -285,114 +338,144 @@ class ProcessingTab(QWidget):
             QMessageBox.critical(self, "Erro", "Prova selecionada não foi encontrada.")
             return
 
+        tot_q = exam.get("num_questoes", 0)
         known_types = list(exam.get("gabaritos", {}).keys())
 
-        # Ler arquivo .dat
+        # Verificar se arquivo foi fornecido para cada parte
+        for p in self.partes_config:
+            p_num = p["parte_num"]
+            p_nome = p["nome"]
+            if p_num not in self.dat_file_paths or not os.path.exists(self.dat_file_paths[p_num]):
+                QMessageBox.warning(
+                    self, "Arquivo Faltando",
+                    f"Por favor, selecione o arquivo .DAT para a **{p_nome}** (Parte {p_num})."
+                )
+                return
+
         parser = DatParser()
-        try:
-            parsed_items = parser.parse_file(self.dat_filepath)
-        except Exception as e:
-            QMessageBox.critical(self, "Erro de Leitura", f"Erro ao ler arquivo .dat:\n{str(e)}")
-            return
+        # Dicionário de respostas por matrícula agrupado por parte: {matricula: {"tipo": str, "parts": {p_num: item_dict}}}
+        student_records = {}
+        all_header_errors = []
 
-        if not parsed_items:
-            QMessageBox.warning(self, "Aviso", "O arquivo .dat selecionado está vazio.")
-            return
+        # Parsear cada arquivo .dat por parte
+        for p in self.partes_config:
+            p_num = p["parte_num"]
+            f_path = self.dat_file_paths[p_num]
+            try:
+                parsed_items = parser.parse_file(f_path)
+            except Exception as e:
+                QMessageBox.critical(self, "Erro de Leitura", f"Erro ao ler arquivo .dat da Parte {p_num}:\n{str(e)}")
+                return
 
-        # --- Verificação de Redundância/Duplicatas de Alunos ---
-        grouped_items = {}
-        for item in parsed_items:
-            mat = item["matricula"]
-            if not mat:
-                mat = f"SEM_MAT_{item['line_number']}"
-            if mat not in grouped_items:
-                grouped_items[mat] = []
-            grouped_items[mat].append(item)
+            for item in parsed_items:
+                if not item["control_ok"]:
+                    all_header_errors.append(item)
+                    continue
 
-        final_parsed_items = []
-        for mat, group in grouped_items.items():
-            if len(group) > 1 and not mat.startswith("SEM_MAT_"):
-                # Diálogo de confirmação para exclusão de duplicata
-                dlg = DuplicateStudentDialog(mat, group, self)
-                if dlg.exec() == QDialog.DialogCode.Accepted and dlg.selected_item:
-                    final_parsed_items.append(dlg.selected_item)
-                else:
-                    final_parsed_items.append(group[0])
-            else:
-                final_parsed_items.append(group[0])
+                mat = item["matricula"]
+                if not mat:
+                    mat = f"SEM_MAT_{item['line_number']}"
+
+                if mat not in student_records:
+                    student_records[mat] = {
+                        "matricula": mat,
+                        "tipo": item["tipo"] or (known_types[0] if known_types else "1"),
+                        "parts": {}
+                    }
+
+                student_records[mat]["parts"][p_num] = item
 
         grading_engine = GradingEngine(exam)
-
         processed_count = 0
-        control_error_items = []
 
         self.processing_model.clear_exam_processings(self.selected_exam_id)
 
-        for item in final_parsed_items:
-            if not item["control_ok"]:
-                control_error_items.append(item)
+        # Tratar erros de cabeçalho salvando como HEADER_ERROR
+        for err_item in all_header_errors:
+            self.processing_model.save_processing(
+                prova_id=self.selected_exam_id,
+                aluno_matricula=err_item["matricula"] or f"DESCONHECIDO_{err_item['line_number']}",
+                tipo_prova=err_item["tipo"] or (known_types[0] if known_types else "1"),
+                respostas_aluno=err_item["respostas"],
+                status_controle="HEADER_ERROR",
+                nota_final=0.0,
+                percentual_acertos=0.0,
+                total_acertos=0,
+                total_questoes=tot_q,
+                detalhes_disciplinas={}
+            )
+
+        # Unificar e Corrigir os registros válidos dos alunos
+        for mat, record in student_records.items():
+            tipo_aluno = record["tipo"]
+            
+            # Montar a string de respostas unificada contínua (Q1..QNn)
+            unified_ans = list(" " * tot_q)
+
+            for p in self.partes_config:
+                p_num = p["parte_num"]
+                q_st = p["q_start"]
+                q_ed = p["q_end"]
+                p_len = p["num_questoes"]
+
+                if p_num in record["parts"]:
+                    raw_part_ans = record["parts"][p_num]["respostas"].upper()[:p_len].ljust(p_len, " ")
+                    for idx in range(p_len):
+                        pos = q_st - 1 + idx
+                        if pos < tot_q:
+                            unified_ans[pos] = raw_part_ans[idx]
+
+            full_respostas_str = "".join(unified_ans)
+
+            try:
+                res = grading_engine.grade_student(tipo_aluno, full_respostas_str)
                 self.processing_model.save_processing(
                     prova_id=self.selected_exam_id,
-                    aluno_matricula=item["matricula"] or f"DESCONHECIDO_{item['line_number']}",
-                    tipo_prova=item["tipo"] or (known_types[0] if known_types else "1"),
-                    respostas_aluno=item["respostas"],
-                    status_controle="HEADER_ERROR",
-                    nota_final=0.0,
-                    percentual_acertos=0.0,
-                    total_acertos=0,
-                    total_questoes=exam.get("num_questoes", 0),
-                    detalhes_disciplinas={}
+                    aluno_matricula=mat,
+                    tipo_prova=tipo_aluno,
+                    respostas_aluno=full_respostas_str,
+                    status_controle="OK",
+                    nota_final=res["nota_final"],
+                    percentual_acertos=res["percentual_acertos"],
+                    total_acertos=res["total_acertos"],
+                    total_questoes=res["total_questoes"],
+                    detalhes_disciplinas=res["detalhes_disciplinas"]
                 )
-            else:
-                try:
-                    res = grading_engine.grade_student(item["tipo"], item["respostas"])
-                    self.processing_model.save_processing(
-                        prova_id=self.selected_exam_id,
-                        aluno_matricula=item["matricula"],
-                        tipo_prova=item["tipo"],
-                        respostas_aluno=item["respostas"],
-                        status_controle="OK",
-                        nota_final=res["nota_final"],
-                        percentual_acertos=res["percentual_acertos"],
-                        total_acertos=res["total_acertos"],
-                        total_questoes=res["total_questoes"],
-                        detalhes_disciplinas=res["detalhes_disciplinas"]
-                    )
-                    processed_count += 1
-                except Exception as e:
-                    item["error_msg"] = str(e)
-                    control_error_items.append(item)
+                processed_count += 1
+            except Exception as e:
+                err_item = {"line_number": 0, "raw_line": f"Matrícula {mat}", "control": "ERR", "matricula": mat, "tipo": tipo_aluno, "error_msg": str(e)}
+                all_header_errors.append(err_item)
 
-        self.populate_error_table(control_error_items, exam, known_types)
+        self.populate_error_table(all_header_errors, exam, known_types)
 
         msg = f"Processamento concluído!\n\nAlunos corrigidos com sucesso: {processed_count}\n"
-        if control_error_items:
-            msg += f"Aviso: Inconsistências de cabeçalho (aluno[0..2] != 000): {len(control_error_items)}\nReveja e corrija os itens sinalizados na tabela abaixo."
+        if all_header_errors:
+            msg += f"Aviso: Registros com falha/cabeçalho inválido: {len(all_header_errors)}\nReveja os itens na tabela de revisão abaixo."
         else:
-            msg += "Todos os registros de cabeçalho ('000') foram validados com sucesso!"
+            msg += "Todos os registros foram validados e unificados com sucesso!"
 
         QMessageBox.information(self, "Resultado do Processamento", msg)
-        self.lbl_status.setText(f"Processamento concluído: {processed_count} ok, {len(control_error_items)} para revisão.")
+        self.lbl_status.setText(f"Processamento concluído: {processed_count} ok, {len(all_header_errors)} para revisão.")
         self.btn_view_res.setEnabled(True)
 
     def populate_error_table(self, error_items: list, exam: dict, known_types: list):
         self.tbl_errors.setRowCount(len(error_items))
 
         for row_idx, item in enumerate(error_items):
-            self.tbl_errors.setItem(row_idx, 0, QTableWidgetItem(str(item["line_number"])))
-            self.tbl_errors.setItem(row_idx, 1, QTableWidgetItem(item["raw_line"]))
+            self.tbl_errors.setItem(row_idx, 0, QTableWidgetItem(str(item.get("line_number", "-"))))
+            self.tbl_errors.setItem(row_idx, 1, QTableWidgetItem(item.get("raw_line", "")))
             
-            c_item = QTableWidgetItem(item["control"])
+            c_item = QTableWidgetItem(item.get("control", ""))
             c_item.setForeground(Qt.GlobalColor.red)
             self.tbl_errors.setItem(row_idx, 2, c_item)
             
-            self.tbl_errors.setItem(row_idx, 3, QTableWidgetItem(item["matricula"]))
-            self.tbl_errors.setItem(row_idx, 4, QTableWidgetItem(item["tipo"]))
+            self.tbl_errors.setItem(row_idx, 3, QTableWidgetItem(item.get("matricula", "")))
+            self.tbl_errors.setItem(row_idx, 4, QTableWidgetItem(item.get("tipo", "")))
 
             btn_fix = QPushButton("Corrigir Dados")
             btn_fix.setIcon(qta.icon('fa5s.wrench', color='white'))
             btn_fix.setObjectName("btnNavy")
-            btn_fix.setMinimumWidth(130)
+            btn_fix.setMinimumWidth(120)
             btn_fix.clicked.connect(lambda _, it=item: self.fix_header_item(it, exam, known_types))
             self.tbl_errors.setCellWidget(row_idx, 5, btn_fix)
 
@@ -403,12 +486,12 @@ class ProcessingTab(QWidget):
             grading_engine = GradingEngine(exam)
 
             try:
-                res = grading_engine.grade_student(fixed_data["tipo"], item["respostas"])
+                res = grading_engine.grade_student(fixed_data["tipo"], item.get("respostas", ""))
                 self.processing_model.save_processing(
                     prova_id=self.selected_exam_id,
                     aluno_matricula=fixed_data["matricula"],
                     tipo_prova=fixed_data["tipo"],
-                    respostas_aluno=item["respostas"],
+                    respostas_aluno=item.get("respostas", ""),
                     status_controle="OK",
                     nota_final=res["nota_final"],
                     percentual_acertos=res["percentual_acertos"],
@@ -424,3 +507,4 @@ class ProcessingTab(QWidget):
     def go_to_results(self):
         if self.on_view_results_request and self.selected_exam_id:
             self.on_view_results_request(self.selected_exam_id)
+

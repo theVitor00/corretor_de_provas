@@ -39,22 +39,54 @@ class GradingEngine:
             if not s.get("tipo") or str(s.get("tipo")).strip().lower() == tipo_str.lower()
         ]
 
+        # Verificar partes / etapas da prova (se houver divisão)
+        partes = self.layout_config.get("partes", [])
+        partes_status = {}
+        for p in partes:
+            p_num = p.get("parte_num", 1)
+            p_nome = p.get("nome", f"Parte {p_num}")
+            q_st = int(p.get("q_start", 1))
+            q_ed = int(p.get("q_end", num_questoes))
+            p_respostas = respostas_aluno[q_st - 1 : q_ed]
+            has_answers = any(c != " " for c in p_respostas)
+            partes_status[p_num] = {
+                "nome": p_nome,
+                "realizada": has_answers,
+                "q_start": q_st,
+                "q_end": q_ed
+            }
+
+        # Pré-inicializar detalhes de todas as disciplinas do tipo para garantir que
+        # disciplinas de partes/blocos ausentes apareçam com nota 0.0 e acertos 0
+        detalhes_disciplinas = {}
+        for s in tipo_subjects:
+            s_name = s.get("nome", "Geral")
+            if s_name not in detalhes_disciplinas:
+                detalhes_disciplinas[s_name] = {
+                    "acertos": 0,
+                    "total": 0,
+                    "soma_pesos_acertos": 0.0,
+                    "soma_pesos_totais": 0.0,
+                    "questoes": [],
+                    "parte_realizada": True
+                }
+
         for s in tipo_subjects:
             s_name = s.get("nome", "Geral")
             start_q = int(s.get("start_q", 1))
             end_q = int(s.get("end_q", num_questoes))
             for q in range(start_q, end_q + 1):
-                q_to_subject[q] = s_name
+                if q <= num_questoes:
+                    q_to_subject[q] = s_name
 
         comparativo = []
-        detalhes_disciplinas = {}
         total_acertos = 0
         soma_pesos_totais = 0.0
         soma_pesos_acertos = 0.0
 
         for i in range(num_questoes):
             q_num = i + 1
-            ans_aluno = respostas_aluno[i] if i < len(respostas_aluno) else ""
+            ans_aluno = respostas_aluno[i] if i < len(respostas_aluno) else " "
             ans_gab = gabarito[i]
             
             disciplina_nome = q_to_subject.get(q_num, "Geral")
@@ -83,7 +115,8 @@ class GradingEngine:
                     "total": 0,
                     "soma_pesos_acertos": 0.0,
                     "soma_pesos_totais": 0.0,
-                    "questoes": []
+                    "questoes": [],
+                    "parte_realizada": True
                 }
 
             detalhes_disciplinas[disciplina_nome]["total"] += 1
@@ -100,8 +133,16 @@ class GradingEngine:
         for d_name, d_data in detalhes_disciplinas.items():
             pct = (d_data["soma_pesos_acertos"] / d_data["soma_pesos_totais"] * 100.0) if d_data["soma_pesos_totais"] > 0 else 0.0
             nota_disc = (d_data["soma_pesos_acertos"] / d_data["soma_pesos_totais"] * 10.0) if d_data["soma_pesos_totais"] > 0 else 0.0
+            
+            q_list = d_data["questoes"]
+            has_disc_answers = any(
+                (respostas_aluno[q-1] != " " if q-1 < len(respostas_aluno) else False)
+                for q in q_list
+            ) if q_list else False
+
             d_data["percentual"] = round(pct, 2)
             d_data["nota"] = round(nota_disc, 2)
+            d_data["parte_realizada"] = has_disc_answers if q_list else False
 
         return {
             "nota_final": round(nota_final, 2),
@@ -109,5 +150,6 @@ class GradingEngine:
             "total_acertos": total_acertos,
             "total_questoes": num_questoes,
             "detalhes_disciplinas": detalhes_disciplinas,
-            "comparativo_questoes": comparativo
+            "comparativo_questoes": comparativo,
+            "partes_status": partes_status
         }
