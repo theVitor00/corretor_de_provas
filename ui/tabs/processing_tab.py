@@ -3,7 +3,8 @@ import qtawesome as qta
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QFileDialog,
-    QDialog, QFormLayout, QMessageBox, QGroupBox, QProgressBar
+    QDialog, QFormLayout, QMessageBox, QGroupBox, QProgressBar,
+    QRadioButton, QButtonGroup
 )
 from PyQt6.QtCore import Qt
 from models.exam import ExamModel
@@ -11,6 +12,74 @@ from models.student import StudentModel
 from models.processing import ProcessingModel
 from services.dat_parser import DatParser
 from services.grading_engine import GradingEngine
+
+class DuplicateStudentDialog(QDialog):
+    """
+    Diálogo para resolução de duplicatas de matrículas de alunos detectadas no arquivo .DAT
+    """
+    def __init__(self, matricula: str, duplicate_items: list, parent=None):
+        super().__init__(parent)
+        self.matricula = matricula
+        self.duplicate_items = duplicate_items
+        self.selected_item = duplicate_items[0]
+        self.setWindowTitle(f"Duplicata Detectada - Matrícula {matricula}")
+        self.setWindowIcon(qta.icon('fa5s.copy', color='#EF4444'))
+        self.resize(680, 380)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        info_lbl = QLabel(
+            f"<b>Atenção: Duplicata de Aluno no Arquivo de Respostas!</b><br>"
+            f"A matrícula <b>'{self.matricula}'</b> foi encontrada <b>{len(self.duplicate_items)} vezes</b> no arquivo .DAT enviado.<br>"
+            "Só deve haver uma única entrada por aluno. Por favor, compare as ocorrências abaixo e escolha qual deseja <b>MANTER</b>.<br>"
+            "A(s) outra(s) linha(s) duplicada(s) será(ão) excluída(s) do processamento."
+        )
+        info_lbl.setWordWrap(True)
+        layout.addWidget(info_lbl)
+
+        table = QTableWidget()
+        table.setColumnCount(4)
+        table.setHorizontalHeaderLabels(["Seleção", "Linha #", "Tipo Prova", "Respostas Registradas"])
+        table.verticalHeader().setDefaultSectionSize(40)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+
+        table.setRowCount(len(self.duplicate_items))
+        self.button_group = QButtonGroup(self)
+
+        for row_idx, item in enumerate(self.duplicate_items):
+            rb = QRadioButton(f"Manter Linha {item['line_number']}")
+            if row_idx == 0:
+                rb.setChecked(True)
+            self.button_group.addButton(rb, row_idx)
+
+            table.setCellWidget(row_idx, 0, rb)
+            table.setItem(row_idx, 1, QTableWidgetItem(f"Linha {item['line_number']}"))
+            table.setItem(row_idx, 2, QTableWidgetItem(f"Tipo {item['tipo']}"))
+            table.setItem(row_idx, 3, QTableWidgetItem(item['respostas']))
+
+        layout.addWidget(table)
+
+        btn_box = QHBoxLayout()
+        btn_confirm = QPushButton("Confirmar Escolha e Excluir Duplicata")
+        btn_confirm.setIcon(qta.icon('fa5s.check', color='white'))
+        btn_confirm.setObjectName("btnNavy")
+        btn_confirm.clicked.connect(self.accept_choice)
+
+        btn_box.addStretch()
+        btn_box.addWidget(btn_confirm)
+        layout.addLayout(btn_box)
+
+    def accept_choice(self):
+        selected_idx = self.button_group.checkedId()
+        if selected_idx >= 0 and selected_idx < len(self.duplicate_items):
+            self.selected_item = self.duplicate_items[selected_idx]
+        self.accept()
+
 
 class HeaderFixDialog(QDialog):
     """
@@ -230,6 +299,28 @@ class ProcessingTab(QWidget):
             QMessageBox.warning(self, "Aviso", "O arquivo .dat selecionado está vazio.")
             return
 
+        # --- Verificação de Redundância/Duplicatas de Alunos ---
+        grouped_items = {}
+        for item in parsed_items:
+            mat = item["matricula"]
+            if not mat:
+                mat = f"SEM_MAT_{item['line_number']}"
+            if mat not in grouped_items:
+                grouped_items[mat] = []
+            grouped_items[mat].append(item)
+
+        final_parsed_items = []
+        for mat, group in grouped_items.items():
+            if len(group) > 1 and not mat.startswith("SEM_MAT_"):
+                # Diálogo de confirmação para exclusão de duplicata
+                dlg = DuplicateStudentDialog(mat, group, self)
+                if dlg.exec() == QDialog.DialogCode.Accepted and dlg.selected_item:
+                    final_parsed_items.append(dlg.selected_item)
+                else:
+                    final_parsed_items.append(group[0])
+            else:
+                final_parsed_items.append(group[0])
+
         grading_engine = GradingEngine(exam)
 
         processed_count = 0
@@ -237,7 +328,7 @@ class ProcessingTab(QWidget):
 
         self.processing_model.clear_exam_processings(self.selected_exam_id)
 
-        for item in parsed_items:
+        for item in final_parsed_items:
             if not item["control_ok"]:
                 control_error_items.append(item)
                 self.processing_model.save_processing(

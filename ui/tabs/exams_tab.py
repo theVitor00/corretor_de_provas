@@ -87,9 +87,10 @@ class ExamFormDialog(QDialog):
         self.exam_data = exam_data
         self.setWindowTitle("Editar Prova" if exam_data else "Nova Prova")
         self.setWindowIcon(qta.icon('fa5s.file-signature', color='#242D64'))
-        self.resize(780, 620)
+        self.resize(780, 680)
         self.gabaritos_map = {}  # {"1": "ABCDE...", "2": "..."}
         self.mapped_subjects = [] # [{"tipo": "1", "nome": "Matemática", "start_q": 1, "end_q": 10}]
+        self.selected_blocos = [] # [{"id": 1, "nome": "Exatas"}]
         self.init_ui()
 
     def init_ui(self):
@@ -104,11 +105,6 @@ class ExamFormDialog(QDialog):
         self.txt_data.setDate(QDate.currentDate())
         self.txt_data.setCalendarPopup(True)
 
-        self.combo_bloco = QComboBox()
-        self.combo_bloco.addItem("Nenhum Bloco", None)
-        for b in self.subject_model.list_blocks():
-            self.combo_bloco.addItem(b["nome"], b["id"])
-
         self.spin_valor = QDoubleSpinBox()
         self.spin_valor.setRange(1.0, 1000.0)
         self.spin_valor.setValue(10.0)
@@ -116,9 +112,39 @@ class ExamFormDialog(QDialog):
 
         f_basic.addRow("Nome da Prova *:", self.txt_nome)
         f_basic.addRow("Data da Prova *:", self.txt_data)
-        f_basic.addRow("Bloco de Disciplinas:", self.combo_bloco)
-        f_basic.addRow("Valor Total (Pontos):", self.spin_valor)
+        f_basic.addRow("Valor Total da Prova (Pontos):", self.spin_valor)
         layout.addWidget(gb_basic)
+
+        # Blocos de Disciplinas (Múltiplos Blocos Permitidos com Proteção Contra Redundância)
+        gb_blocos = QGroupBox("Blocos de Disciplinas da Prova (Múltiplos Blocos Permitidos)")
+        l_blocos = QVBoxLayout(gb_blocos)
+
+        h_b_controls = QHBoxLayout()
+        self.combo_bloco = QComboBox()
+        self.combo_bloco.addItem("Selecione um bloco para adicionar...", None)
+        for b in self.subject_model.list_blocks():
+            self.combo_bloco.addItem(b["nome"], b)
+
+        btn_add_bloco = QPushButton("Adicionar Bloco")
+        btn_add_bloco.setIcon(qta.icon('fa5s.plus', color='white'))
+        btn_add_bloco.setObjectName("btnNavy")
+        btn_add_bloco.clicked.connect(self.add_bloco_to_exam)
+
+        btn_rem_bloco = QPushButton("Remover Bloco Selecionado")
+        btn_rem_bloco.setIcon(qta.icon('fa5s.trash-alt', color='#EF4444'))
+        btn_rem_bloco.setObjectName("btnSecondary")
+        btn_rem_bloco.clicked.connect(self.remove_bloco_from_exam)
+
+        h_b_controls.addWidget(self.combo_bloco, 1)
+        h_b_controls.addWidget(btn_add_bloco)
+        h_b_controls.addWidget(btn_rem_bloco)
+        l_blocos.addLayout(h_b_controls)
+
+        self.list_blocos = QListWidget()
+        self.list_blocos.setMaximumHeight(80)
+        l_blocos.addWidget(self.list_blocos)
+
+        layout.addWidget(gb_blocos)
 
         # Tipos e Gabaritos
         gb_gab = QGroupBox("Tipos de Prova e Gabaritos (Obrigatoriamente 1 Gabarito por Tipo)")
@@ -164,7 +190,7 @@ class ExamFormDialog(QDialog):
         btn_add_map.setObjectName("btnSecondary")
         btn_add_map.clicked.connect(self.add_subject_mapping)
 
-        btn_rem_map = QPushButton("Remover Selecionado")
+        btn_rem_map = QPushButton("Remover Mapeamento Selecionado")
         btn_rem_map.setIcon(qta.icon('fa5s.trash-alt', color='#EF4444'))
         btn_rem_map.setObjectName("btnSecondary")
         btn_rem_map.clicked.connect(self.remove_subject_mapping)
@@ -175,6 +201,7 @@ class ExamFormDialog(QDialog):
         l_map.addLayout(h_m_controls)
 
         self.list_map = QListWidget()
+        self.list_map.setMaximumHeight(90)
         l_map.addWidget(self.list_map)
 
         layout.addWidget(gb_map)
@@ -185,16 +212,13 @@ class ExamFormDialog(QDialog):
             q_date = QDate.fromString(self.exam_data["data"], "yyyy-MM-dd")
             if q_date.isValid():
                 self.txt_data.setDate(q_date)
-            
-            bloco_id = self.exam_data.get("bloco_id")
-            if bloco_id:
-                idx = self.combo_bloco.findData(bloco_id)
-                if idx >= 0:
-                    self.combo_bloco.setCurrentIndex(idx)
 
             self.spin_valor.setValue(float(self.exam_data.get("valor_total", 10.0)))
             self.gabaritos_map = self.exam_data.get("gabaritos", {})
             self.mapped_subjects = self.exam_data.get("layout_config", {}).get("subjects", [])
+            self.selected_blocos = self.exam_data.get("blocos_list", [])
+
+            self.refresh_blocos_list()
             self.refresh_gabaritos_table()
             self.refresh_mapped_subjects_list()
 
@@ -212,6 +236,31 @@ class ExamFormDialog(QDialog):
         btn_box.addWidget(btn_cancel)
         btn_box.addWidget(btn_save)
         layout.addLayout(btn_box)
+
+    def add_bloco_to_exam(self):
+        bloco = self.combo_bloco.currentData()
+        if not bloco:
+            QMessageBox.warning(self, "Aviso", "Selecione um bloco de disciplinas válido.")
+            return
+
+        # Proteção contra redundância de blocos na prova
+        if any(b["id"] == bloco["id"] for b in self.selected_blocos):
+            QMessageBox.warning(self, "Bloco Redundante", f"O bloco '{bloco['nome']}' já foi adicionado a esta prova.")
+            return
+
+        self.selected_blocos.append(bloco)
+        self.refresh_blocos_list()
+
+    def remove_bloco_from_exam(self):
+        row = self.list_blocos.currentRow()
+        if row >= 0 and row < len(self.selected_blocos):
+            del self.selected_blocos[row]
+            self.refresh_blocos_list()
+
+    def refresh_blocos_list(self):
+        self.list_blocos.clear()
+        for b in self.selected_blocos:
+            self.list_blocos.addItem(f"• Bloco: {b['nome']}")
 
     def add_gabarito(self):
         tipo = self.txt_tipo.text().strip()
@@ -287,8 +336,8 @@ class ExamFormDialog(QDialog):
     def validate_and_save(self):
         nome = self.txt_nome.text().strip()
         data = self.txt_data.date().toString("yyyy-MM-dd")
-        bloco_id = self.combo_bloco.currentData()
         valor_total = self.spin_valor.value()
+        bloco_ids = [b["id"] for b in self.selected_blocos]
 
         if not nome or not data:
             QMessageBox.warning(self, "Campos Obrigatórios", "Informe o Nome e a Data da prova.")
@@ -306,12 +355,12 @@ class ExamFormDialog(QDialog):
             if self.exam_data:
                 self.exam_model.update_exam(
                     self.exam_data["id"], nome, data, self.gabaritos_map,
-                    bloco_id=bloco_id, valor_total=valor_total, layout_config=layout_config
+                    bloco_ids=bloco_ids, valor_total=valor_total, layout_config=layout_config
                 )
             else:
                 self.exam_model.create_exam(
                     nome, data, self.gabaritos_map,
-                    bloco_id=bloco_id, valor_total=valor_total, layout_config=layout_config
+                    bloco_ids=bloco_ids, valor_total=valor_total, layout_config=layout_config
                 )
             self.accept()
         except Exception as e:
@@ -347,7 +396,7 @@ class ExamsTab(QWidget):
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Data", "Nome da Prova", "Bloco", "Tipos de Gabarito", "Total Alunos", "Ações"
+            "ID", "Data", "Nome da Prova", "Bloco(s)", "Tipos de Gabarito", "Total Alunos", "Ações"
         ])
         self.table.verticalHeader().setDefaultSectionSize(44)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -420,7 +469,9 @@ class ExamsTab(QWidget):
             self.load_exams()
 
     def edit_exam(self, exam_data):
-        dlg = ExamFormDialog(self.exam_model, self.subject_model, self, exam_data=exam_data)
+        # Buscar dados completos incluindo blocos_list
+        full_exam = self.exam_model.get_exam_by_id(exam_data["id"])
+        dlg = ExamFormDialog(self.exam_model, self.subject_model, self, exam_data=full_exam)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             QMessageBox.information(self, "Sucesso", "Prova atualizada com sucesso!")
             self.load_exams()

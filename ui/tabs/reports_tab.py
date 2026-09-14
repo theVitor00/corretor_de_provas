@@ -169,6 +169,23 @@ class ReportsTab(QWidget):
 
         self.update_cards(self.current_results)
 
+        # Identificar disciplinas dos resultados
+        disc_set = set()
+        for r in self.current_results:
+            det = r.get("detalhes_disciplinas", {})
+            for d_name in det.keys():
+                disc_set.add(d_name)
+        disc_list = sorted(list(disc_set))
+
+        # Reconfigurar cabeçalhos dinamicamente
+        headers = ["Matrícula", "Nome do Aluno", "Turma", "Tipo", "Acertos", "% Acertos"]
+        for d in disc_list:
+            headers.append(d)
+        headers.extend(["Nota Final", "Ação"])
+
+        self.tbl_results.setColumnCount(len(headers))
+        self.tbl_results.setHorizontalHeaderLabels(headers)
+
         self.tbl_results.setRowCount(len(self.current_results))
         for row_idx, r in enumerate(self.current_results):
             self.tbl_results.setItem(row_idx, 0, QTableWidgetItem(r["aluno_matricula"]))
@@ -178,15 +195,26 @@ class ReportsTab(QWidget):
             self.tbl_results.setItem(row_idx, 4, QTableWidgetItem(f"{r['total_acertos']}/{r['total_questoes']}"))
             self.tbl_results.setItem(row_idx, 5, QTableWidgetItem(f"{r['percentual_acertos']:.1f}%"))
 
+            col_curr = 6
+            det = r.get("detalhes_disciplinas", {})
+            for d in disc_list:
+                d_info = det.get(d, {})
+                tot = d_info.get("total", 0)
+                ac = d_info.get("acertos", 0)
+                n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                self.tbl_results.setItem(row_idx, col_curr, QTableWidgetItem(f"{n_disc:.2f}"))
+                col_curr += 1
+
             nota_item = QTableWidgetItem(f"{r['nota_final']:.2f}")
-            self.tbl_results.setItem(row_idx, 6, nota_item)
+            self.tbl_results.setItem(row_idx, col_curr, nota_item)
+            col_curr += 1
 
             btn_view = QPushButton("Boletim Individual")
             btn_view.setIcon(qta.icon('fa5s.id-card', color='#242D64'))
             btn_view.setObjectName("btnSecondary")
             btn_view.setMinimumWidth(140)
             btn_view.clicked.connect(lambda _, item_data=r: self.view_individual_report(item_data))
-            self.tbl_results.setCellWidget(row_idx, 7, btn_view)
+            self.tbl_results.setCellWidget(row_idx, col_curr, btn_view)
 
     def update_cards(self, results: list):
         if not results:
@@ -267,16 +295,36 @@ class ReportsTab(QWidget):
             return
 
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setPageOrientation(Qt.Orientation.Landscape)
         dialog = QPrintDialog(printer, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             doc = QTextDocument()
             html = f"<h2>Relatório de Prova: {self.current_exam['nome']}</h2>"
-            html += f"<p><b>Data:</b> {self.current_exam['data']} | <b>Alunos:</b> {len(self.current_results)}</p>"
+            html += f"<p><b>Data:</b> {self.current_exam['data']} | <b>Alunos Processados:</b> {len(self.current_results)}</p>"
             html += "<table border='1' cellspacing='0' cellpadding='5' width='100%'>"
-            html += "<tr><th>Matrícula</th><th>Aluno</th><th>Turma</th><th>Tipo</th><th>Acertos</th><th>% Acertos</th><th>Nota Final</th></tr>"
+            
+            disc_set = set()
+            for r in self.current_results:
+                det = r.get("detalhes_disciplinas", {})
+                for d_name in det.keys():
+                    disc_set.add(d_name)
+            disc_list = sorted(list(disc_set))
+
+            html += "<tr><th>Matrícula</th><th>Aluno</th><th>Turma</th><th>Tipo</th><th>Acertos</th><th>% Acertos</th>"
+            for d in disc_list:
+                html += f"<th>{d}</th>"
+            html += "<th>Nota Final</th></tr>"
             
             for r in self.current_results:
-                html += f"<tr><td>{r['aluno_matricula']}</td><td>{r['aluno_nome']}</td><td>{r['aluno_turma']}</td><td>{r['tipo_prova']}</td><td>{r['total_acertos']}/{r['total_questoes']}</td><td>{r['percentual_acertos']:.1f}%</td><td><b>{r['nota_final']:.2f}</b></td></tr>"
+                det = r.get("detalhes_disciplinas", {})
+                html += f"<tr><td>{r['aluno_matricula']}</td><td>{r['aluno_nome']}</td><td>{r['aluno_turma']}</td><td>{r['tipo_prova']}</td><td>{r['total_acertos']}/{r['total_questoes']}</td><td>{r['percentual_acertos']:.1f}%</td>"
+                for d in disc_list:
+                    d_info = det.get(d, {})
+                    tot = d_info.get("total", 0)
+                    ac = d_info.get("acertos", 0)
+                    n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                    html += f"<td>{n_disc:.2f}</td>"
+                html += f"<td><b>{r['nota_final']:.2f}</b></td></tr>"
             
             html += "</table>"
             doc.setHtml(html)

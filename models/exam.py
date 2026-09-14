@@ -12,7 +12,7 @@ class ExamModel:
         nome: str, 
         data: str, 
         gabaritos: Dict[str, str], 
-        bloco_id: Optional[int] = None, 
+        bloco_ids: Optional[List[int]] = None, 
         valor_total: float = 10.0, 
         layout_config: Optional[Dict[str, Any]] = None
     ) -> int:
@@ -24,31 +24,41 @@ class ExamModel:
         if not gabaritos or not isinstance(gabaritos, dict):
             raise ValueError("A prova precisa ter ao menos um tipo de gabarito cadastrado.")
 
-        # Validação mandatória: O número de gabaritos precisa ser igual à quantidade de tipos cadastrados
         tipos = list(gabaritos.keys())
         if len(gabaritos) != len(tipos):
             raise ValueError("O número de gabaritos da prova precisa ser rigorosamente igual à quantidade de tipos.")
 
-        # Validar tamanho dos gabaritos (todos os gabaritos devem ter a mesma quantidade de questões)
         lengths = [len(resp.strip()) for resp in gabaritos.values()]
         if len(set(lengths)) > 1:
             raise ValueError("Todos os tipos de gabarito da prova devem possuir o mesmo número de questões.")
 
         layout_json = json.dumps(layout_config or {}, ensure_ascii=False)
 
+        # Garantir ausência de blocos duplicados (proteção contra redundância)
+        unique_bloco_ids = list(dict.fromkeys(bloco_ids or []))
+        first_bloco_id = unique_bloco_ids[0] if unique_bloco_ids else None
+
         with self.db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
                 INSERT INTO provas (nome, data, bloco_id, valor_total, layout_config)
                 VALUES (?, ?, ?, ?, ?)
-            """, (nome, data, bloco_id, valor_total, layout_json))
+            """, (nome, data, first_bloco_id, valor_total, layout_json))
             exam_id = cur.lastrowid
 
+            # Inserir gabaritos
             for tipo, respostas in gabaritos.items():
                 cur.execute("""
                     INSERT INTO prova_gabaritos (prova_id, tipo, respostas)
                     VALUES (?, ?, ?)
                 """, (exam_id, str(tipo).strip(), str(respostas).strip().upper()))
+
+            # Inserir múltiplos blocos vinculados
+            for b_id in unique_bloco_ids:
+                cur.execute("""
+                    INSERT OR IGNORE INTO prova_blocos (prova_id, bloco_id)
+                    VALUES (?, ?)
+                """, (exam_id, b_id))
 
             conn.commit()
             return exam_id
@@ -59,7 +69,7 @@ class ExamModel:
         nome: str, 
         data: str, 
         gabaritos: Dict[str, str], 
-        bloco_id: Optional[int] = None, 
+        bloco_ids: Optional[List[int]] = None, 
         valor_total: float = 10.0, 
         layout_config: Optional[Dict[str, Any]] = None
     ):
@@ -80,6 +90,8 @@ class ExamModel:
             raise ValueError("Todos os tipos de gabarito da prova devem possuir o mesmo número de questões.")
 
         layout_json = json.dumps(layout_config or {}, ensure_ascii=False)
+        unique_bloco_ids = list(dict.fromkeys(bloco_ids or []))
+        first_bloco_id = unique_bloco_ids[0] if unique_bloco_ids else None
 
         with self.db.get_connection() as conn:
             cur = conn.cursor()
@@ -87,7 +99,7 @@ class ExamModel:
                 UPDATE provas
                 SET nome = ?, data = ?, bloco_id = ?, valor_total = ?, layout_config = ?
                 WHERE id = ?
-            """, (nome, data, bloco_id, valor_total, layout_json, exam_id))
+            """, (nome, data, first_bloco_id, valor_total, layout_json, exam_id))
 
             cur.execute("DELETE FROM prova_gabaritos WHERE prova_id = ?", (exam_id,))
             for tipo, respostas in gabaritos.items():
@@ -95,6 +107,13 @@ class ExamModel:
                     INSERT INTO prova_gabaritos (prova_id, tipo, respostas)
                     VALUES (?, ?, ?)
                 """, (exam_id, str(tipo).strip(), str(respostas).strip().upper()))
+
+            cur.execute("DELETE FROM prova_blocos WHERE prova_id = ?", (exam_id,))
+            for b_id in unique_bloco_ids:
+                cur.execute("""
+                    INSERT OR IGNORE INTO prova_blocos (prova_id, bloco_id)
+                    VALUES (?, ?)
+                """, (exam_id, b_id))
 
             conn.commit()
 
@@ -108,9 +127,8 @@ class ExamModel:
         with self.db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
-                SELECT p.*, b.nome as bloco_nome
+                SELECT p.*
                 FROM provas p
-                LEFT JOIN blocos b ON p.bloco_id = b.id
                 WHERE p.id = ?
             """, (exam_id,))
             row = cur.fetchone()
@@ -129,15 +147,28 @@ class ExamModel:
             cur.execute("SELECT tipo, respostas FROM prova_gabaritos WHERE prova_id = ? ORDER BY tipo ASC", (exam_id,))
             exam["gabaritos"] = {r["tipo"]: r["respostas"] for r in cur.fetchall()}
             exam["num_questoes"] = len(next(iter(exam["gabaritos"].values()))) if exam["gabaritos"] else 0
+
+            # Obter blocos vinculados
+            cur.execute("""
+                SELECT b.id, b.nome
+                FROM prova_blocos pb
+                JOIN blocos b ON b.id = pb.bloco_id
+                WHERE pb.prova_id = ?
+                ORDER BY b.nome ASC
+            """, (exam_id,))
+            b_rows = cur.fetchall()
+            exam["bloco_ids"] = [r["id"] for r in b_rows]
+            exam["blocos_list"] = [dict(r) for r in b_rows]
+            exam["bloco_nome"] = ", ".join(r["nome"] for r in b_rows) if b_rows else "Geral"
+
             return exam
 
     def list_exams(self) -> List[Dict[str, Any]]:
         with self.db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
-                SELECT p.*, b.nome as bloco_nome
+                SELECT p.*
                 FROM provas p
-                LEFT JOIN blocos b ON p.bloco_id = b.id
                 ORDER BY p.data DESC, p.id DESC
             """)
             rows = cur.fetchall()
@@ -159,6 +190,17 @@ class ExamModel:
                 
                 cur.execute("SELECT COUNT(*) as total FROM prova_processamentos WHERE prova_id = ?", (exam["id"],))
                 exam["total_processados"] = cur.fetchone()["total"]
+
+                # Obter nomes dos blocos vinculados
+                cur.execute("""
+                    SELECT b.nome
+                    FROM prova_blocos pb
+                    JOIN blocos b ON b.id = pb.bloco_id
+                    WHERE pb.prova_id = ?
+                    ORDER BY b.nome ASC
+                """, (exam["id"],))
+                b_rows = cur.fetchall()
+                exam["bloco_nome"] = ", ".join(r["nome"] for r in b_rows) if b_rows else "Geral"
                 
                 exams.append(exam)
             return exams

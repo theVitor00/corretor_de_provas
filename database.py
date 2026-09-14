@@ -78,6 +78,18 @@ class Database:
                 );
             """)
 
+            # Tabela de Relacionamento N:N entre Provas e Blocos (Múltiplos Blocos por Prova)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS prova_blocos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    prova_id INTEGER NOT NULL,
+                    bloco_id INTEGER NOT NULL,
+                    FOREIGN KEY (prova_id) REFERENCES provas(id) ON DELETE CASCADE,
+                    FOREIGN KEY (bloco_id) REFERENCES blocos(id) ON DELETE CASCADE,
+                    UNIQUE(prova_id, bloco_id)
+                );
+            """)
+
             # Tabela de Gabaritos por Tipo de Prova
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS prova_gabaritos (
@@ -130,7 +142,6 @@ class Database:
         with self.get_connection() as conn:
             cur = conn.cursor()
             
-            # Limpar alunos
             cur.execute("SELECT id, matricula FROM alunos")
             rows = cur.fetchall()
             for row in rows:
@@ -140,10 +151,8 @@ class Database:
                     try:
                         cur.execute("UPDATE alunos SET matricula = ? WHERE id = ?", (cleaned, row["id"]))
                     except sqlite3.IntegrityError:
-                        # Em caso de duplicidade gerada pela limpeza, remove a duplicata antiga
                         cur.execute("DELETE FROM alunos WHERE id = ?", (row["id"],))
 
-            # Limpar prova_processamentos
             cur.execute("SELECT id, aluno_matricula FROM prova_processamentos")
             p_rows = cur.fetchall()
             for row in p_rows:

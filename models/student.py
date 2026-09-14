@@ -93,6 +93,7 @@ class StudentModel:
             if not student:
                 return []
 
+            # 1. Provas em que o aluno foi processado
             cur.execute("""
                 SELECT 
                     p.id AS processamento_id,
@@ -105,24 +106,53 @@ class StudentModel:
                     p.percentual_acertos,
                     p.total_acertos,
                     p.total_questoes,
-                    p.detalhes_disciplinas
+                    p.detalhes_disciplinas,
+                    'Presente' AS status_presenca
                 FROM prova_processamentos p
                 JOIN provas pr ON pr.id = p.prova_id
                 WHERE p.aluno_matricula = ? OR p.aluno_id = ?
-                ORDER BY pr.data DESC, pr.id DESC
             """, (student["matricula"], student_id))
-            
+            processed_rows = {row["prova_id"]: dict(row) for row in cur.fetchall()}
+
+            # 2. Buscar todas as provas que tiveram processamento no sistema
+            cur.execute("""
+                SELECT DISTINCT pr.id AS prova_id, pr.nome AS prova_nome, pr.data AS prova_data, pr.valor_total AS prova_valor_total
+                FROM provas pr
+                JOIN prova_processamentos pp ON pp.prova_id = pr.id
+            """)
+            all_processed_exams = [dict(row) for row in cur.fetchall()]
+
             history = []
-            for row in cur.fetchall():
-                item = dict(row)
-                if item["detalhes_disciplinas"]:
-                    try:
-                        item["detalhes_disciplinas"] = json.loads(item["detalhes_disciplinas"])
-                    except Exception:
+            for exam in all_processed_exams:
+                eid = exam["prova_id"]
+                if eid in processed_rows:
+                    item = processed_rows[eid]
+                    if item["detalhes_disciplinas"]:
+                        try:
+                            item["detalhes_disciplinas"] = json.loads(item["detalhes_disciplinas"])
+                        except Exception:
+                            item["detalhes_disciplinas"] = {}
+                    else:
                         item["detalhes_disciplinas"] = {}
+                    history.append(item)
                 else:
-                    item["detalhes_disciplinas"] = {}
-                history.append(item)
+                    # Aluno não realizou a prova (ausente no arquivo de respostas) -> Nota ZERO registrada para histórico
+                    history.append({
+                        "processamento_id": None,
+                        "prova_id": eid,
+                        "prova_nome": exam["prova_nome"],
+                        "prova_data": exam["prova_data"],
+                        "prova_valor_total": exam["prova_valor_total"],
+                        "tipo_prova": "Ausente",
+                        "nota_final": 0.0,
+                        "percentual_acertos": 0.0,
+                        "total_acertos": 0,
+                        "total_questoes": 0,
+                        "detalhes_disciplinas": {},
+                        "status_presenca": "Ausente (Zero)"
+                    })
+
+            history.sort(key=lambda x: (x.get("prova_data") or "", x.get("prova_id") or 0), reverse=True)
             return history
 
     def get_student_performance_stats(self, student_id: int) -> Dict[str, Any]:

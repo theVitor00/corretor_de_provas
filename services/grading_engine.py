@@ -96,10 +96,12 @@ class GradingEngine:
         percentual_acertos = (soma_pesos_acertos / soma_pesos_totais * 100.0) if soma_pesos_totais > 0 else 0.0
         nota_final = (soma_pesos_acertos / soma_pesos_totais * self.valor_total) if soma_pesos_totais > 0 else 0.0
 
-        # Formatar nota por disciplina proporcional ao valor total ou percentual
+        # Formatar nota por disciplina onde cada disciplina vale 10,0 individualmente
         for d_name, d_data in detalhes_disciplinas.items():
             pct = (d_data["soma_pesos_acertos"] / d_data["soma_pesos_totais"] * 100.0) if d_data["soma_pesos_totais"] > 0 else 0.0
+            nota_disc = (d_data["soma_pesos_acertos"] / d_data["soma_pesos_totais"] * 10.0) if d_data["soma_pesos_totais"] > 0 else 0.0
             d_data["percentual"] = round(pct, 2)
+            d_data["nota"] = round(nota_disc, 2)
 
         return {
             "nota_final": round(nota_final, 2),
