@@ -90,7 +90,7 @@ class SubjectBlockModel:
             row = cur.fetchone()
             return dict(row) if row else None
 
-    def list_subjects((self) -> List[Dict[str, Any]]:
+    def list_subjects(self) -> List[Dict[str, Any]]:
         with self.db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
