@@ -1,4 +1,5 @@
 import os
+import qtawesome as qta
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QGroupBox,
@@ -75,17 +76,23 @@ class ReportsTab(QWidget):
         # Action / Export Bar
         h_exports = QHBoxLayout()
         
-        btn_pdf = QPushButton("📄 Exportar PDF (A4 Oficial)")
+        btn_pdf = QPushButton("Exportar PDF (A4 Oficial)")
+        btn_pdf.setIcon(qta.icon('fa5s.file-pdf', color='white'))
         btn_pdf.setObjectName("btnNavy")
         btn_pdf.clicked.connect(self.export_pdf)
 
-        btn_excel = QPushButton("📊 Exportar Excel (.xlsx)")
+        btn_excel = QPushButton("Exportar Excel (.xlsx)")
+        btn_excel.setIcon(qta.icon('fa5s.file-excel', color='#242D64'))
+        btn_excel.setObjectName("btnSecondary")
         btn_excel.clicked.connect(self.export_excel)
 
-        btn_word = QPushButton("📝 Exportar Word (.docx)")
+        btn_word = QPushButton("Exportar Word (.docx)")
+        btn_word.setIcon(qta.icon('fa5s.file-word', color='#242D64'))
+        btn_word.setObjectName("btnSecondary")
         btn_word.clicked.connect(self.export_word)
 
-        btn_print = QPushButton("🖨️ Imprimir (A4)")
+        btn_print = QPushButton("Imprimir (A4)")
+        btn_print.setIcon(qta.icon('fa5s.print', color='#242D64'))
         btn_print.setObjectName("btnSecondary")
         btn_print.clicked.connect(self.print_report)
 
@@ -103,6 +110,7 @@ class ReportsTab(QWidget):
         self.tbl_results.setHorizontalHeaderLabels([
             "Matrícula", "Nome do Aluno", "Turma", "Tipo", "Acertos", "% Acertos", "Nota Final", "Ação"
         ])
+        self.tbl_results.verticalHeader().setDefaultSectionSize(44)
         self.tbl_results.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_results.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.tbl_results.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -110,7 +118,8 @@ class ReportsTab(QWidget):
         self.tbl_results.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_results.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_results.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        self.tbl_results.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        self.tbl_results.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        self.tbl_results.setColumnWidth(7, 160)
 
         layout.addWidget(self.tbl_results)
 
@@ -170,11 +179,12 @@ class ReportsTab(QWidget):
             self.tbl_results.setItem(row_idx, 5, QTableWidgetItem(f"{r['percentual_acertos']:.1f}%"))
 
             nota_item = QTableWidgetItem(f"{r['nota_final']:.2f}")
-            nota_item.setFont(nota_item.font())
             self.tbl_results.setItem(row_idx, 6, nota_item)
 
             btn_view = QPushButton("Boletim Individual")
+            btn_view.setIcon(qta.icon('fa5s.id-card', color='#242D64'))
             btn_view.setObjectName("btnSecondary")
+            btn_view.setMinimumWidth(140)
             btn_view.clicked.connect(lambda _, item_data=r: self.view_individual_report(item_data))
             self.tbl_results.setCellWidget(row_idx, 7, btn_view)
 
@@ -204,7 +214,7 @@ class ReportsTab(QWidget):
         else:
             QMessageBox.information(
                 self, "Boletim Individual",
-                f"Aluno {result_item['aluno_nome']} (Matrícula: {result_item['aluno_matricula']})\n"
+                f"Aluno: {result_item['aluno_nome']} (Matrícula: {result_item['aluno_matricula']})\n"
                 f"Nota Final: {result_item['nota_final']:.2f}\n"
                 f"Acertos: {result_item['total_acertos']}/{result_item['total_questoes']} ({result_item['percentual_acertos']:.1f}%)"
             )

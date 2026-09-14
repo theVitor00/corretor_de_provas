@@ -1,3 +1,4 @@
+import qtawesome as qta
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel, QPushButton
 )
@@ -16,7 +17,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Corretor de Provas - Sistema de Leitura e Correção Automatizada")
-        self.resize(1180, 760)
+        self.resize(1200, 780)
         self.init_ui()
 
     def init_ui(self):
@@ -30,14 +31,21 @@ class MainWindow(QMainWindow):
         # Header Branding Bar
         header_bar = QHBoxLayout()
         
-        logo_lbl = QLabel("📚 <b>CORRETOR DE PROVAS</b>")
-        logo_lbl.setStyleSheet("font-size: 20px; color: #242D64;")
+        logo_icon = QLabel()
+        logo_icon.setPixmap(qta.icon('fa5s.graduation-cap', color='#242D64').pixmap(32, 32))
+
+        logo_lbl = QLabel("<b>CORRETOR DE PROVAS</b>")
+        logo_lbl.setStyleSheet("font-size: 20px; color: #242D64; font-weight: bold;")
 
         sub_lbl = QLabel("Sistema de Leitura de Gabaritos, Correção e Emissão de Relatórios")
         sub_lbl.setStyleSheet("font-size: 13px; color: #64748B;")
 
+        h_title = QHBoxLayout()
+        h_title.addWidget(logo_icon)
+        h_title.addWidget(logo_lbl)
+
         v_head = QVBoxLayout()
-        v_head.addWidget(logo_lbl)
+        v_head.addLayout(h_title)
         v_head.addWidget(sub_lbl)
 
         header_bar.addLayout(v_head)
@@ -62,14 +70,14 @@ class MainWindow(QMainWindow):
         self.tab_reports = ReportsTab()
         self.tab_settings = SettingsTab()
 
-        # Add tabs in exact user workflow order
-        self.tabs.addTab(self.tab_students, "1. Alunos")
-        self.tabs.addTab(self.tab_subjects, "2. Disciplinas e Blocos")
-        self.tabs.addTab(self.tab_exams, "3. Provas")
-        self.tabs.addTab(self.tab_processing, "4. Processar .DAT")
-        self.tabs.addTab(self.tab_conference, "5. Conferência")
-        self.tabs.addTab(self.tab_reports, "6. Resultados e Relatórios")
-        self.tabs.addTab(self.tab_settings, "7. Configurações")
+        # Add tabs with FontAwesome vector icons
+        self.tabs.addTab(self.tab_students, qta.icon('fa5s.user-graduate', color='#242D64'), "1. Alunos")
+        self.tabs.addTab(self.tab_subjects, qta.icon('fa5s.book', color='#242D64'), "2. Disciplinas e Blocos")
+        self.tabs.addTab(self.tab_exams, qta.icon('fa5s.file-alt', color='#242D64'), "3. Provas")
+        self.tabs.addTab(self.tab_processing, qta.icon('fa5s.cogs', color='#242D64'), "4. Processar .DAT")
+        self.tabs.addTab(self.tab_conference, qta.icon('fa5s.tasks', color='#242D64'), "5. Conferência")
+        self.tabs.addTab(self.tab_reports, qta.icon('fa5s.chart-bar', color='#242D64'), "6. Resultados e Relatórios")
+        self.tabs.addTab(self.tab_settings, qta.icon('fa5s.sliders-h', color='#242D64'), "7. Configurações")
 
         self.tabs.currentChanged.connect(self.on_tab_changed)
 
@@ -77,16 +85,15 @@ class MainWindow(QMainWindow):
 
     def on_process_exam_request(self, exam_id: int):
         self.tab_processing.select_exam(exam_id)
-        self.tabs.setCurrentIndex(3)  # Switch to Processing tab
+        self.tabs.setCurrentIndex(3)
 
     def on_view_results_request(self, exam_id: int):
         self.tab_reports.select_exam(exam_id)
         self.tab_reports.load_results()
         self.tab_conference.select_exam_and_student(exam_id)
-        self.tabs.setCurrentIndex(5)  # Switch to Reports tab
+        self.tabs.setCurrentIndex(5)
 
     def on_tab_changed(self, index: int):
-        # Refresh current tab data when navigated to
         if index == 0:
             self.tab_students.load_students()
         elif index == 1:

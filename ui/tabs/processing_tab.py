@@ -1,4 +1,5 @@
 import os
+import qtawesome as qta
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QFileDialog,
@@ -19,8 +20,9 @@ class HeaderFixDialog(QDialog):
         super().__init__(parent)
         self.raw_item = raw_item
         self.known_types = known_types
-        self.setWindowTitle(f"Revisar Linha {raw_item['line_number']} - Código de Controle Invalido")
-        self.resize(420, 240)
+        self.setWindowTitle(f"Revisar Linha {raw_item['line_number']} - Código de Controle Inválido")
+        self.setWindowIcon(qta.icon('fa5s.exclamation-triangle', color='#EF4444'))
+        self.resize(440, 240)
         self.init_ui()
 
     def init_ui(self):
@@ -56,10 +58,12 @@ class HeaderFixDialog(QDialog):
 
         btn_box = QHBoxLayout()
         btn_cancel = QPushButton("Cancelar / Ignorar Linha")
+        btn_cancel.setIcon(qta.icon('fa5s.times', color='#242D64'))
         btn_cancel.setObjectName("btnSecondary")
         btn_cancel.clicked.connect(self.reject)
 
         btn_save = QPushButton("Confirmar Correção")
+        btn_save.setIcon(qta.icon('fa5s.check', color='white'))
         btn_save.setObjectName("btnNavy")
         btn_save.clicked.connect(self.validate_and_accept)
 
@@ -108,6 +112,7 @@ class ProcessingTab(QWidget):
         self.txt_filepath.setPlaceholderText("Nenhum arquivo .dat selecionado...")
 
         btn_browse = QPushButton("Buscar Arquivo .DAT...")
+        btn_browse.setIcon(qta.icon('fa5s.folder-open', color='white'))
         btn_browse.setObjectName("btnNavy")
         btn_browse.clicked.connect(self.browse_dat_file)
 
@@ -124,12 +129,14 @@ class ProcessingTab(QWidget):
         l_process = QVBoxLayout(gb_process)
 
         h_btn_proc = QHBoxLayout()
-        self.btn_process = QPushButton("⚡ Processar Prova e Calcular Notas")
+        self.btn_process = QPushButton("Processar Prova e Calcular Notas")
+        self.btn_process.setIcon(qta.icon('fa5s.bolt', color='white'))
         self.btn_process.setObjectName("btnNavy")
         self.btn_process.clicked.connect(self.process_dat_file)
         h_btn_proc.addWidget(self.btn_process)
 
-        self.btn_view_res = QPushButton("📊 Ir Para Conferência / Resultados")
+        self.btn_view_res = QPushButton("Ir Para Conferência / Resultados")
+        self.btn_view_res.setIcon(qta.icon('fa5s.chart-pie', color='#242D64'))
         self.btn_view_res.setObjectName("btnSecondary")
         self.btn_view_res.setEnabled(False)
         self.btn_view_res.clicked.connect(self.go_to_results)
@@ -151,12 +158,14 @@ class ProcessingTab(QWidget):
         self.tbl_errors.setHorizontalHeaderLabels([
             "Linha", "Linha Bruta", "Controle Lido", "Matrícula", "Tipo", "Ação"
         ])
+        self.tbl_errors.verticalHeader().setDefaultSectionSize(44)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.tbl_errors.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.tbl_errors.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self.tbl_errors.setColumnWidth(5, 150)
 
         l_errors.addWidget(self.tbl_errors)
         layout.addWidget(gb_errors)
@@ -226,13 +235,11 @@ class ProcessingTab(QWidget):
         processed_count = 0
         control_error_items = []
 
-        # Limpar processamentos prévios da mesma prova se o usuário desejar
         self.processing_model.clear_exam_processings(self.selected_exam_id)
 
         for item in parsed_items:
             if not item["control_ok"]:
                 control_error_items.append(item)
-                # Salvar registro sinalizando erro de controle
                 self.processing_model.save_processing(
                     prova_id=self.selected_exam_id,
                     aluno_matricula=item["matricula"] or f"DESCONHECIDO_{item['line_number']}",
@@ -265,14 +272,13 @@ class ProcessingTab(QWidget):
                     item["error_msg"] = str(e)
                     control_error_items.append(item)
 
-        # Atualizar interface de erros de cabeçalho
         self.populate_error_table(control_error_items, exam, known_types)
 
         msg = f"Processamento concluído!\n\nAlunos corrigidos com sucesso: {processed_count}\n"
         if control_error_items:
-            msg += f"⚠️ Inconsistências de cabeçalho (aluno[0..2] != 000): {len(control_error_items)}\nReveja e corrija os itens sinalizados na tabela abaixo."
+            msg += f"Aviso: Inconsistências de cabeçalho (aluno[0..2] != 000): {len(control_error_items)}\nReveja e corrija os itens sinalizados na tabela abaixo."
         else:
-            msg += "✅ Todos os registros de cabeçalho ('000') foram validados com sucesso!"
+            msg += "Todos os registros de cabeçalho ('000') foram validados com sucesso!"
 
         QMessageBox.information(self, "Resultado do Processamento", msg)
         self.lbl_status.setText(f"Processamento concluído: {processed_count} ok, {len(control_error_items)} para revisão.")
@@ -293,7 +299,9 @@ class ProcessingTab(QWidget):
             self.tbl_errors.setItem(row_idx, 4, QTableWidgetItem(item["tipo"]))
 
             btn_fix = QPushButton("Corrigir Dados")
+            btn_fix.setIcon(qta.icon('fa5s.wrench', color='white'))
             btn_fix.setObjectName("btnNavy")
+            btn_fix.setMinimumWidth(130)
             btn_fix.clicked.connect(lambda _, it=item: self.fix_header_item(it, exam, known_types))
             self.tbl_errors.setCellWidget(row_idx, 5, btn_fix)
 
@@ -318,7 +326,6 @@ class ProcessingTab(QWidget):
                     detalhes_disciplinas=res["detalhes_disciplinas"]
                 )
                 QMessageBox.information(self, "Sucesso", "Correção aplicada e nota recalculada!")
-                # Re-processar/Atualizar estado
                 self.process_dat_file()
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Erro ao aplicar correção:\n{str(e)}")

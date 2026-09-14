@@ -1,3 +1,4 @@
+import qtawesome as qta
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QDialog,
@@ -11,7 +12,8 @@ class BlockFormDialog(QDialog):
         super().__init__(parent)
         self.block_data = block_data
         self.setWindowTitle("Editar Bloco" if block_data else "Novo Bloco")
-        self.resize(320, 150)
+        self.setWindowIcon(qta.icon('fa5s.cubes', color='#242D64'))
+        self.resize(340, 150)
         self.init_ui()
 
     def init_ui(self):
@@ -27,10 +29,12 @@ class BlockFormDialog(QDialog):
 
         btn_box = QHBoxLayout()
         btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setIcon(qta.icon('fa5s.times', color='#242D64'))
         btn_cancel.setObjectName("btnSecondary")
         btn_cancel.clicked.connect(self.reject)
 
         btn_save = QPushButton("Salvar")
+        btn_save.setIcon(qta.icon('fa5s.check', color='white'))
         btn_save.setObjectName("btnNavy")
         btn_save.clicked.connect(self.accept)
 
@@ -48,7 +52,8 @@ class SubjectFormDialog(QDialog):
         self.model = model
         self.subject_data = subject_data
         self.setWindowTitle("Editar Disciplina" if subject_data else "Nova Disciplina")
-        self.resize(360, 180)
+        self.setWindowIcon(qta.icon('fa5s.book-open', color='#242D64'))
+        self.resize(380, 180)
         self.init_ui()
 
     def init_ui(self):
@@ -76,10 +81,12 @@ class SubjectFormDialog(QDialog):
 
         btn_box = QHBoxLayout()
         btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setIcon(qta.icon('fa5s.times', color='#242D64'))
         btn_cancel.setObjectName("btnSecondary")
         btn_cancel.clicked.connect(self.reject)
 
         btn_save = QPushButton("Salvar")
+        btn_save.setIcon(qta.icon('fa5s.check', color='white'))
         btn_save.setObjectName("btnNavy")
         btn_save.clicked.connect(self.accept)
 
@@ -109,18 +116,22 @@ class SubjectsBlocksTab(QWidget):
         l_blocos = QVBoxLayout(panel_blocos)
 
         h_b_actions = QHBoxLayout()
-        btn_new_block = QPushButton("+ Novo Bloco")
+        btn_new_block = QPushButton("Novo Bloco")
+        btn_new_block.setIcon(qta.icon('fa5s.plus', color='white'))
         btn_new_block.setObjectName("btnNavy")
         btn_new_block.clicked.connect(self.new_block)
         h_b_actions.addWidget(btn_new_block)
+        h_b_actions.addStretch()
         l_blocos.addLayout(h_b_actions)
 
         self.tbl_blocos = QTableWidget()
         self.tbl_blocos.setColumnCount(3)
         self.tbl_blocos.setHorizontalHeaderLabels(["ID", "Nome do Bloco", "Ações"])
+        self.tbl_blocos.verticalHeader().setDefaultSectionSize(44)
         self.tbl_blocos.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_blocos.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.tbl_blocos.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.tbl_blocos.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.tbl_blocos.setColumnWidth(2, 170)
         l_blocos.addWidget(self.tbl_blocos)
 
         splitter.addWidget(panel_blocos)
@@ -130,19 +141,23 @@ class SubjectsBlocksTab(QWidget):
         l_disc = QVBoxLayout(panel_disc)
 
         h_d_actions = QHBoxLayout()
-        btn_new_subject = QPushButton("+ Nova Disciplina")
+        btn_new_subject = QPushButton("Nova Disciplina")
+        btn_new_subject.setIcon(qta.icon('fa5s.plus', color='white'))
         btn_new_subject.setObjectName("btnNavy")
         btn_new_subject.clicked.connect(self.new_subject)
         h_d_actions.addWidget(btn_new_subject)
+        h_d_actions.addStretch()
         l_disc.addLayout(h_d_actions)
 
         self.tbl_disc = QTableWidget()
         self.tbl_disc.setColumnCount(4)
         self.tbl_disc.setHorizontalHeaderLabels(["ID", "Nome", "Bloco", "Ações"])
+        self.tbl_disc.verticalHeader().setDefaultSectionSize(44)
         self.tbl_disc.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_disc.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.tbl_disc.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.tbl_disc.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.tbl_disc.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.tbl_disc.setColumnWidth(3, 170)
         l_disc.addWidget(self.tbl_disc)
 
         splitter.addWidget(panel_disc)
@@ -165,14 +180,19 @@ class SubjectsBlocksTab(QWidget):
 
             btn_panel = QWidget()
             btn_layout = QHBoxLayout(btn_panel)
-            btn_layout.setContentsMargins(2, 2, 2, 2)
+            btn_layout.setContentsMargins(4, 2, 4, 2)
+            btn_layout.setSpacing(6)
 
             btn_edit = QPushButton("Editar")
+            btn_edit.setIcon(qta.icon('fa5s.edit', color='#242D64'))
             btn_edit.setObjectName("btnSecondary")
+            btn_edit.setMinimumWidth(75)
             btn_edit.clicked.connect(lambda _, b_data=b: self.edit_block(b_data))
 
             btn_del = QPushButton("Excluir")
+            btn_del.setIcon(qta.icon('fa5s.trash-alt', color='white'))
             btn_del.setObjectName("btnDanger")
+            btn_del.setMinimumWidth(75)
             btn_del.clicked.connect(lambda _, b_id=b["id"], b_nome=b["nome"]: self.delete_block(b_id, b_nome))
 
             btn_layout.addWidget(btn_edit)
@@ -190,14 +210,19 @@ class SubjectsBlocksTab(QWidget):
 
             btn_panel = QWidget()
             btn_layout = QHBoxLayout(btn_panel)
-            btn_layout.setContentsMargins(2, 2, 2, 2)
+            btn_layout.setContentsMargins(4, 2, 4, 2)
+            btn_layout.setSpacing(6)
 
             btn_edit = QPushButton("Editar")
+            btn_edit.setIcon(qta.icon('fa5s.edit', color='#242D64'))
             btn_edit.setObjectName("btnSecondary")
+            btn_edit.setMinimumWidth(75)
             btn_edit.clicked.connect(lambda _, s_data=s: self.edit_subject(s_data))
 
             btn_del = QPushButton("Excluir")
+            btn_del.setIcon(qta.icon('fa5s.trash-alt', color='white'))
             btn_del.setObjectName("btnDanger")
+            btn_del.setMinimumWidth(75)
             btn_del.clicked.connect(lambda _, s_id=s["id"], s_nome=s["nome"]: self.delete_subject(s_id, s_nome))
 
             btn_layout.addWidget(btn_edit)

@@ -1,3 +1,4 @@
+import qtawesome as qta
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QDialog,
@@ -14,7 +15,8 @@ class SubjectRangeDialog(QDialog):
         self.subjects_list = subjects_list
         self.total_questions = total_questions
         self.setWindowTitle("Adicionar Mapeamento de Disciplina")
-        self.resize(340, 180)
+        self.setWindowIcon(qta.icon('fa5s.layer-group', color='#242D64'))
+        self.resize(360, 180)
         self.init_ui()
 
     def init_ui(self):
@@ -41,10 +43,12 @@ class SubjectRangeDialog(QDialog):
 
         btn_box = QHBoxLayout()
         btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setIcon(qta.icon('fa5s.times', color='#242D64'))
         btn_cancel.setObjectName("btnSecondary")
         btn_cancel.clicked.connect(self.reject)
 
         btn_add = QPushButton("Adicionar")
+        btn_add.setIcon(qta.icon('fa5s.plus', color='white'))
         btn_add.setObjectName("btnNavy")
         btn_add.clicked.connect(self.validate_and_accept)
 
@@ -75,7 +79,8 @@ class ExamFormDialog(QDialog):
         self.subject_model = subject_model
         self.exam_data = exam_data
         self.setWindowTitle("Editar Prova" if exam_data else "Nova Prova")
-        self.resize(750, 580)
+        self.setWindowIcon(qta.icon('fa5s.file-signature', color='#242D64'))
+        self.resize(780, 600)
         self.gabaritos_map = {}  # {"1": "ABCDE...", "2": "..."}
         self.mapped_subjects = [] # [{"nome": "Matemática", "start_q": 1, "end_q": 10}]
         self.init_ui()
@@ -120,7 +125,8 @@ class ExamFormDialog(QDialog):
         self.txt_gabarito = QLineEdit()
         self.txt_gabarito.setPlaceholderText("Sequência de Gabarito (ex: ABCDEABCDE...)")
 
-        btn_add_gab = QPushButton("+ Adicionar Gabarito")
+        btn_add_gab = QPushButton("Adicionar Gabarito")
+        btn_add_gab.setIcon(qta.icon('fa5s.plus', color='white'))
         btn_add_gab.setObjectName("btnNavy")
         btn_add_gab.clicked.connect(self.add_gabarito)
 
@@ -146,10 +152,12 @@ class ExamFormDialog(QDialog):
         l_map = QVBoxLayout(gb_map)
 
         h_m_controls = QHBoxLayout()
-        btn_add_map = QPushButton("+ Definir Faixa de Questões por Disciplina")
+        btn_add_map = QPushButton("Definir Faixa de Questões por Disciplina")
+        btn_add_map.setIcon(qta.icon('fa5s.layer-group', color='#242D64'))
         btn_add_map.setObjectName("btnSecondary")
         btn_add_map.clicked.connect(self.add_subject_mapping)
         h_m_controls.addWidget(btn_add_map)
+        h_m_controls.addStretch()
         l_map.addLayout(h_m_controls)
 
         self.list_map = QListWidget()
@@ -178,10 +186,12 @@ class ExamFormDialog(QDialog):
 
         btn_box = QHBoxLayout()
         btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setIcon(qta.icon('fa5s.times', color='#242D64'))
         btn_cancel.setObjectName("btnSecondary")
         btn_cancel.clicked.connect(self.reject)
 
         btn_save = QPushButton("Salvar Prova")
+        btn_save.setIcon(qta.icon('fa5s.save', color='white'))
         btn_save.setObjectName("btnNavy")
         btn_save.clicked.connect(self.validate_and_save)
 
@@ -197,7 +207,6 @@ class ExamFormDialog(QDialog):
             QMessageBox.warning(self, "Aviso", "Preencha o Tipo e a sequência do Gabarito.")
             return
 
-        # Verificar se os gabaritos existentes possuem o mesmo tamanho
         if self.gabaritos_map:
             existing_len = len(next(iter(self.gabaritos_map.values())))
             if len(gab) != existing_len:
@@ -224,6 +233,7 @@ class ExamFormDialog(QDialog):
             self.tbl_gabaritos.setItem(row_idx, 1, QTableWidgetItem(f"{gab} ({len(gab)} Qs)"))
 
             btn_del = QPushButton("Remover")
+            btn_del.setIcon(qta.icon('fa5s.trash-alt', color='white'))
             btn_del.setObjectName("btnDanger")
             btn_del.clicked.connect(lambda _, t=tipo: self.remove_gabarito(t))
             self.tbl_gabaritos.setCellWidget(row_idx, 2, btn_del)
@@ -300,7 +310,8 @@ class ExamsTab(QWidget):
 
         # Header Bar
         h_bar = QHBoxLayout()
-        btn_new_exam = QPushButton("+ Cadastrar Nova Prova")
+        btn_new_exam = QPushButton("Cadastrar Nova Prova")
+        btn_new_exam.setIcon(qta.icon('fa5s.plus', color='white'))
         btn_new_exam.setObjectName("btnNavy")
         btn_new_exam.clicked.connect(self.new_exam)
         h_bar.addWidget(btn_new_exam)
@@ -316,13 +327,15 @@ class ExamsTab(QWidget):
         self.table.setHorizontalHeaderLabels([
             "ID", "Data", "Nome da Prova", "Bloco", "Tipos de Gabarito", "Total Alunos", "Ações"
         ])
+        self.table.verticalHeader().setDefaultSectionSize(44)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(6, 420)
 
         l_hist.addWidget(self.table)
         layout.addWidget(gb_history)
@@ -345,21 +358,30 @@ class ExamsTab(QWidget):
 
             btn_panel = QWidget()
             btn_layout = QHBoxLayout(btn_panel)
-            btn_layout.setContentsMargins(2, 2, 2, 2)
+            btn_layout.setContentsMargins(4, 2, 4, 2)
+            btn_layout.setSpacing(6)
 
             btn_proc = QPushButton("Processar .DAT")
+            btn_proc.setIcon(qta.icon('fa5s.cogs', color='white'))
             btn_proc.setObjectName("btnNavy")
+            btn_proc.setMinimumWidth(115)
             btn_proc.clicked.connect(lambda _, e_id=e["id"]: self.process_exam(e_id))
 
             btn_res = QPushButton("Resultados")
+            btn_res.setIcon(qta.icon('fa5s.chart-line', color='#242D64'))
             btn_res.setObjectName("btnSecondary")
+            btn_res.setMinimumWidth(95)
             btn_res.clicked.connect(lambda _, e_id=e["id"]: self.view_results(e_id))
 
             btn_edit = QPushButton("Editar")
+            btn_edit.setIcon(qta.icon('fa5s.edit', color='#242D64'))
+            btn_edit.setMinimumWidth(75)
             btn_edit.clicked.connect(lambda _, e_data=e: self.edit_exam(e_data))
 
             btn_del = QPushButton("Excluir")
+            btn_del.setIcon(qta.icon('fa5s.trash-alt', color='white'))
             btn_del.setObjectName("btnDanger")
+            btn_del.setMinimumWidth(75)
             btn_del.clicked.connect(lambda _, e_id=e["id"], e_nome=e["nome"]: self.delete_exam(e_id, e_nome))
 
             btn_layout.addWidget(btn_proc)

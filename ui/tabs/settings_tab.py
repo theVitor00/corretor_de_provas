@@ -1,9 +1,11 @@
 import os
+import qtawesome as qta
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
     QGroupBox, QFileDialog, QMessageBox, QFormLayout
 )
 from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import Qt
 from database import Database, db as default_db
 
 class SettingsTab(QWidget):
@@ -24,10 +26,12 @@ class SettingsTab(QWidget):
         self.txt_logo_path.setReadOnly(True)
 
         btn_browse_logo = QPushButton("Selecionar Imagem...")
+        btn_browse_logo.setIcon(qta.icon('fa5s.image', color='white'))
         btn_browse_logo.setObjectName("btnNavy")
         btn_browse_logo.clicked.connect(self.browse_logo)
 
         btn_clear_logo = QPushButton("Remover Logo")
+        btn_clear_logo.setIcon(qta.icon('fa5s.trash-alt', color='#242D64'))
         btn_clear_logo.setObjectName("btnSecondary")
         btn_clear_logo.clicked.connect(self.clear_logo)
 
@@ -50,7 +54,8 @@ class SettingsTab(QWidget):
 
         # Save Action
         h_btn = QHBoxLayout()
-        btn_save = QPushButton("💾 Salvar Configurações")
+        btn_save = QPushButton("Salvar Configurações")
+        btn_save.setIcon(qta.icon('fa5s.save', color='white'))
         btn_save.setObjectName("btnNavy")
         btn_save.clicked.connect(self.save_settings)
         h_btn.addWidget(btn_save)

@@ -1,3 +1,4 @@
+import qtawesome as qta
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QGroupBox,
@@ -61,7 +62,8 @@ class ConferenceTab(QWidget):
         l_left.addWidget(self.lbl_hits)
         l_left.addStretch()
 
-        self.btn_save_edits = QPushButton("💾 Recalcular e Salvar Marcações")
+        self.btn_save_edits = QPushButton("Recalcular e Salvar Marcações")
+        self.btn_save_edits.setIcon(qta.icon('fa5s.save', color='white'))
         self.btn_save_edits.setObjectName("btnNavy")
         self.btn_save_edits.setEnabled(False)
         self.btn_save_edits.clicked.connect(self.save_edited_answers)
@@ -78,6 +80,7 @@ class ConferenceTab(QWidget):
         self.tbl_answers.setHorizontalHeaderLabels([
             "Questão #", "Disciplina", "Gabarito Oficial", "Marcação do Aluno (Editável)", "Peso", "Resultado"
         ])
+        self.tbl_answers.verticalHeader().setDefaultSectionSize(40)
         self.tbl_answers.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_answers.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.tbl_answers.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -179,7 +182,6 @@ class ConferenceTab(QWidget):
             self.tbl_answers.setItem(row_idx, 1, QTableWidgetItem(q["disciplina"]))
             self.tbl_answers.setItem(row_idx, 2, QTableWidgetItem(q["gabarito"]))
 
-            # Editable student answer cell
             ans_item = QTableWidgetItem(q["aluno"])
             ans_item.setFlags(ans_item.flags() | Qt.ItemFlag.ItemIsEditable)
             self.tbl_answers.setItem(row_idx, 3, ans_item)
