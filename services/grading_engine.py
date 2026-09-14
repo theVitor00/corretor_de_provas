@@ -32,9 +32,14 @@ class GradingEngine:
         subjects_config = self.layout_config.get("subjects", [])
         question_weights = self.layout_config.get("weights", {})  # {str(q_num): peso}
 
-        # Construir mapa de disciplina por questão (1-indexed)
+        # Construir mapa de disciplina por questão (1-indexed) considerando o tipo de prova
         q_to_subject = {}
-        for s in subjects_config:
+        tipo_subjects = [
+            s for s in subjects_config 
+            if not s.get("tipo") or str(s.get("tipo")).strip().lower() == tipo_str.lower()
+        ]
+
+        for s in tipo_subjects:
             s_name = s.get("nome", "Geral")
             start_q = int(s.get("start_q", 1))
             end_q = int(s.get("end_q", num_questoes))

@@ -1,9 +1,23 @@
 import sqlite3
 import os
 import json
-from typing import Optional
+from typing import Optional, Any
 
 DEFAULT_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corretor.db")
+
+def clean_matricula(mat: Any) -> str:
+    """
+    Remove zeros à esquerda da matrícula.
+    Exemplo: '002536' -> '2536', '0001' -> '1', '0' -> '0'.
+    """
+    if mat is None:
+        return ""
+    s = str(mat).strip()
+    if not s:
+        return ""
+    cleaned = s.lstrip("0")
+    return cleaned if cleaned else "0"
+
 
 class Database:
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
@@ -104,6 +118,39 @@ class Database:
                     valor TEXT
                 );
             """)
+
+            conn.commit()
+
+        self.migrate_matriculas()
+
+    def migrate_matriculas(self):
+        """
+        Migração automática: remove zeros à esquerda de todas as matrículas no banco de dados.
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            
+            # Limpar alunos
+            cur.execute("SELECT id, matricula FROM alunos")
+            rows = cur.fetchall()
+            for row in rows:
+                orig = row["matricula"]
+                cleaned = clean_matricula(orig)
+                if cleaned != orig:
+                    try:
+                        cur.execute("UPDATE alunos SET matricula = ? WHERE id = ?", (cleaned, row["id"]))
+                    except sqlite3.IntegrityError:
+                        # Em caso de duplicidade gerada pela limpeza, remove a duplicata antiga
+                        cur.execute("DELETE FROM alunos WHERE id = ?", (row["id"],))
+
+            # Limpar prova_processamentos
+            cur.execute("SELECT id, aluno_matricula FROM prova_processamentos")
+            p_rows = cur.fetchall()
+            for row in p_rows:
+                orig = row["aluno_matricula"]
+                cleaned = clean_matricula(orig)
+                if cleaned != orig:
+                    cur.execute("UPDATE prova_processamentos SET aluno_matricula = ? WHERE id = ?", (cleaned, row["id"]))
 
             conn.commit()
 

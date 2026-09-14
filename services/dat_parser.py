@@ -1,5 +1,6 @@
 import os
 from typing import List, Dict, Any
+from database import clean_matricula
 
 class DatParser:
     def __init__(
@@ -24,7 +25,7 @@ class DatParser:
             for line_idx, raw_line in enumerate(f, start=1):
                 line = raw_line.strip()
                 if not line:
-                    continue  # Ignorar linhas vazias
+                    continue
 
                 item = self.parse_line(line, line_idx)
                 results.append(item)
@@ -47,17 +48,13 @@ class DatParser:
                 "error_msg": f"Linha muito curta ({len(line)} caractere(s)). Mínimo esperado: {min_required_length}."
             }
 
-        # Extração conforme especificação posicional:
-        # aluno[0..2] -> controle
-        # aluno[3..6] -> matrícula
-        # aluno[7]    -> tipo da prova
-        # aluno[8..n] -> respostas
         c_end = self.control_len
         m_end = c_end + self.matricula_len
         t_end = m_end + self.tipo_len
 
         control_val = line[0:c_end]
-        matricula_val = line[c_end:m_end]
+        raw_matricula = line[c_end:m_end]
+        matricula_val = clean_matricula(raw_matricula)
         tipo_val = line[m_end:t_end]
         respostas_val = line[t_end:].upper()
 

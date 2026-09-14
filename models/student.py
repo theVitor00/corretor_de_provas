@@ -1,14 +1,14 @@
 import sqlite3
 import json
 from typing import List, Dict, Any, Optional
-from database import Database, db as default_db
+from database import Database, db as default_db, clean_matricula
 
 class StudentModel:
     def __init__(self, db: Database = default_db):
         self.db = db
 
     def create(self, matricula: str, nome: str, turma: str) -> int:
-        matricula = str(matricula).strip()
+        matricula = clean_matricula(matricula)
         nome = str(nome).strip()
         turma = str(turma).strip()
         if not matricula or not nome or not turma:
@@ -24,7 +24,7 @@ class StudentModel:
             return cur.lastrowid
 
     def update(self, student_id: int, matricula: str, nome: str, turma: str):
-        matricula = str(matricula).strip()
+        matricula = clean_matricula(matricula)
         nome = str(nome).strip()
         turma = str(turma).strip()
         if not matricula or not nome or not turma:
@@ -53,9 +53,10 @@ class StudentModel:
             return dict(row) if row else None
 
     def get_by_matricula(self, matricula: str) -> Optional[Dict[str, Any]]:
+        cleaned = clean_matricula(matricula)
         with self.db.get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT * FROM alunos WHERE matricula = ?", (str(matricula).strip(),))
+            cur.execute("SELECT * FROM alunos WHERE matricula = ?", (cleaned,))
             row = cur.fetchone()
             return dict(row) if row else None
 
@@ -70,8 +71,9 @@ class StudentModel:
                 params.append(turma_filter.strip())
 
             if search and search.strip():
+                s_clean = search.strip()
                 query += " AND (nome LIKE ? OR matricula LIKE ?)"
-                search_param = f"%{search.strip()}%"
+                search_param = f"%{s_clean}%"
                 params.extend([search_param, search_param])
 
             query += " ORDER BY nome ASC"
@@ -142,7 +144,6 @@ class StudentModel:
         melhor_nota = max(notas) if notas else 0.0
         pior_nota = min(notas) if notas else 0.0
 
-        # Performance por disciplina
         subject_stats = {}
         for h in history:
             disc_dict = h.get("detalhes_disciplinas", {})

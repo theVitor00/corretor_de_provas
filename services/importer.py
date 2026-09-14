@@ -3,6 +3,7 @@ import json
 import os
 from typing import List, Dict, Any, Tuple
 from models.student import StudentModel, default_db
+from database import clean_matricula
 
 class StudentImporter:
     def __init__(self, student_model: StudentModel = None):
@@ -24,7 +25,6 @@ class StudentImporter:
                 if not row or not any(field.strip() for field in row):
                     continue
 
-                # Detectar e ignorar cabeçalho se houver
                 if first_row and any(col.lower() in ["matricula", "matrícula", "nome", "turma"] for col in row):
                     first_row = False
                     continue
@@ -36,7 +36,8 @@ class StudentImporter:
                     error_count += 1
                     continue
 
-                matricula, nome, turma = row[0].strip(), row[1].strip(), row[2].strip()
+                raw_matricula, nome, turma = row[0].strip(), row[1].strip(), row[2].strip()
+                matricula = clean_matricula(raw_matricula)
 
                 if not matricula or not nome or not turma:
                     errors.append(f"Linha {row_idx}: Matrícula, nome e turma não podem ser vazios.")
@@ -84,7 +85,8 @@ class StudentImporter:
                 error_count += 1
                 continue
 
-            matricula = str(item.get("matricula", "")).strip()
+            raw_matricula = str(item.get("matricula", "")).strip()
+            matricula = clean_matricula(raw_matricula)
             nome = str(item.get("nome", "")).strip()
             turma = str(item.get("turma", "")).strip()
 

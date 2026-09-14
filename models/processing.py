@@ -1,7 +1,7 @@
 import sqlite3
 import json
 from typing import List, Dict, Any, Optional
-from database import Database, db as default_db
+from database import Database, db as default_db, clean_matricula
 
 class ProcessingModel:
     def __init__(self, db: Database = default_db):
@@ -22,7 +22,7 @@ class ProcessingModel:
         aluno_id: Optional[int] = None
     ) -> int:
         detalhes_json = json.dumps(detalhes_disciplinas or {}, ensure_ascii=False)
-        aluno_matricula = str(aluno_matricula).strip()
+        aluno_matricula = clean_matricula(aluno_matricula)
 
         # Tentar vincular aluno se aluno_id não foi passado
         if not aluno_id:
@@ -93,7 +93,7 @@ class ProcessingModel:
             conn.commit()
 
     def update_header_control(self, proc_id: int, nova_matricula: str, novo_tipo: str):
-        nova_matricula = str(nova_matricula).strip()
+        nova_matricula = clean_matricula(nova_matricula)
         novo_tipo = str(novo_tipo).strip()
         with self.db.get_connection() as conn:
             cur = conn.cursor()

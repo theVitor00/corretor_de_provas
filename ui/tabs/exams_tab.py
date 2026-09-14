@@ -10,18 +10,23 @@ from models.exam import ExamModel
 from models.subject import SubjectBlockModel
 
 class SubjectRangeDialog(QDialog):
-    def __init__(self, subjects_list, total_questions, parent=None):
+    def __init__(self, available_types: list, subjects_list: list, total_questions: int, parent=None):
         super().__init__(parent)
+        self.available_types = available_types
         self.subjects_list = subjects_list
         self.total_questions = total_questions
-        self.setWindowTitle("Adicionar Mapeamento de Disciplina")
+        self.setWindowTitle("Adicionar Mapeamento de Disciplina por Tipo de Prova")
         self.setWindowIcon(qta.icon('fa5s.layer-group', color='#242D64'))
-        self.resize(360, 180)
+        self.resize(380, 220)
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
         form = QFormLayout()
+
+        self.combo_tipo = QComboBox()
+        for t in self.available_types:
+            self.combo_tipo.addItem(f"Tipo {t}", t)
 
         self.combo_subject = QComboBox()
         for s in self.subjects_list:
@@ -35,9 +40,10 @@ class SubjectRangeDialog(QDialog):
         self.spin_end.setRange(1, max(1, self.total_questions))
         self.spin_end.setValue(max(1, self.total_questions))
 
-        form.addRow("Disciplina:", self.combo_subject)
-        form.addRow("Questão Inicial:", self.spin_start)
-        form.addRow("Questão Final:", self.spin_end)
+        form.addRow("Tipo da Prova *:", self.combo_tipo)
+        form.addRow("Disciplina *:", self.combo_subject)
+        form.addRow("Questão Inicial *:", self.spin_start)
+        form.addRow("Questão Final *:", self.spin_end)
 
         layout.addLayout(form)
 
@@ -65,6 +71,7 @@ class SubjectRangeDialog(QDialog):
     def get_data(self):
         s_data = self.combo_subject.currentData()
         return {
+            "tipo": self.combo_tipo.currentData(),
             "subject_id": s_data["id"],
             "nome": s_data["nome"],
             "start_q": self.spin_start.value(),
@@ -80,9 +87,9 @@ class ExamFormDialog(QDialog):
         self.exam_data = exam_data
         self.setWindowTitle("Editar Prova" if exam_data else "Nova Prova")
         self.setWindowIcon(qta.icon('fa5s.file-signature', color='#242D64'))
-        self.resize(780, 600)
+        self.resize(780, 620)
         self.gabaritos_map = {}  # {"1": "ABCDE...", "2": "..."}
-        self.mapped_subjects = [] # [{"nome": "Matemática", "start_q": 1, "end_q": 10}]
+        self.mapped_subjects = [] # [{"tipo": "1", "nome": "Matemática", "start_q": 1, "end_q": 10}]
         self.init_ui()
 
     def init_ui(self):
@@ -147,16 +154,23 @@ class ExamFormDialog(QDialog):
 
         layout.addWidget(gb_gab)
 
-        # Mapeamento por Disciplinas
-        gb_map = QGroupBox("Mapeamento Posicional por Disciplina (Customização de Leitura)")
+        # Mapeamento por Disciplinas e Tipo
+        gb_map = QGroupBox("Mapeamento Posicional por Disciplina e Tipo de Prova")
         l_map = QVBoxLayout(gb_map)
 
         h_m_controls = QHBoxLayout()
-        btn_add_map = QPushButton("Definir Faixa de Questões por Disciplina")
+        btn_add_map = QPushButton("Definir Faixa por Disciplina e Tipo")
         btn_add_map.setIcon(qta.icon('fa5s.layer-group', color='#242D64'))
         btn_add_map.setObjectName("btnSecondary")
         btn_add_map.clicked.connect(self.add_subject_mapping)
+
+        btn_rem_map = QPushButton("Remover Selecionado")
+        btn_rem_map.setIcon(qta.icon('fa5s.trash-alt', color='#EF4444'))
+        btn_rem_map.setObjectName("btnSecondary")
+        btn_rem_map.clicked.connect(self.remove_subject_mapping)
+
         h_m_controls.addWidget(btn_add_map)
+        h_m_controls.addWidget(btn_rem_map)
         h_m_controls.addStretch()
         l_map.addLayout(h_m_controls)
 
@@ -243,22 +257,30 @@ class ExamFormDialog(QDialog):
             QMessageBox.warning(self, "Aviso", "Cadastre ao menos um tipo de gabarito antes de mapear disciplinas.")
             return
 
+        available_types = list(self.gabaritos_map.keys())
         num_q = len(next(iter(self.gabaritos_map.values())))
         all_subjects = self.subject_model.list_subjects()
         if not all_subjects:
             QMessageBox.warning(self, "Aviso", "Nenhuma disciplina cadastrada no sistema. Cadastre disciplinas na aba 'Disciplinas e Blocos'.")
             return
 
-        dlg = SubjectRangeDialog(all_subjects, num_q, self)
+        dlg = SubjectRangeDialog(available_types, all_subjects, num_q, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             data = dlg.get_data()
             self.mapped_subjects.append(data)
             self.refresh_mapped_subjects_list()
 
+    def remove_subject_mapping(self):
+        row = self.list_map.currentRow()
+        if row >= 0 and row < len(self.mapped_subjects):
+            del self.mapped_subjects[row]
+            self.refresh_mapped_subjects_list()
+
     def refresh_mapped_subjects_list(self):
         self.list_map.clear()
         for idx, m in enumerate(self.mapped_subjects):
-            text = f"• {m['nome']}: Questão {m['start_q']} até Questão {m['end_q']}"
+            tipo_label = f"Tipo {m.get('tipo')}" if m.get('tipo') else "Todos"
+            text = f"• [{tipo_label}] {m['nome']}: Questão {m['start_q']} até Questão {m['end_q']}"
             item = QListWidgetItem(text)
             self.list_map.addItem(item)
 
