@@ -131,7 +131,7 @@ class ExamModel:
             exam["num_questoes"] = len(next(iter(exam["gabaritos"].values()))) if exam["gabaritos"] else 0
             return exam
 
-    def list_exams() -> List[Dict[str, Any]]:
+    def list_exams(self) -> List[Dict[str, Any]]:
         with self.db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""

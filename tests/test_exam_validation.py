@@ -24,6 +24,10 @@ def test_exam_creation_and_parity_validation(test_db):
     assert len(exam["gabaritos"]) == 2
     assert exam["num_questoes"] == 10
 
+    all_exams = model.list_exams()
+    assert len(all_exams) == 1
+    assert all_exams[0]["nome"] == "Prova Final 2026"
+
 def test_exam_validation_mismatched_lengths(test_db):
     model = ExamModel(test_db)
 
