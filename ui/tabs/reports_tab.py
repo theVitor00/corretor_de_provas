@@ -104,22 +104,16 @@ class ReportsTab(QWidget):
 
         layout.addLayout(h_exports)
 
-        # Table Area
+        # Table Area with Horizontal Scrollbar Support
         self.tbl_results = QTableWidget()
         self.tbl_results.setColumnCount(8)
         self.tbl_results.setHorizontalHeaderLabels([
             "Matrícula", "Nome do Aluno", "Turma", "Tipo", "Acertos", "% Acertos", "Nota Final", "Ação"
         ])
         self.tbl_results.verticalHeader().setDefaultSectionSize(44)
-        self.tbl_results.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tbl_results.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.tbl_results.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.tbl_results.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.tbl_results.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.tbl_results.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        self.tbl_results.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        self.tbl_results.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self.tbl_results.setColumnWidth(7, 160)
+        self.tbl_results.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.tbl_results.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
+        self.tbl_results.horizontalHeader().setStretchLastSection(False)
 
         layout.addWidget(self.tbl_results)
 
@@ -192,6 +186,35 @@ class ReportsTab(QWidget):
 
         self.tbl_results.setColumnCount(len(headers))
         self.tbl_results.setHorizontalHeaderLabels(headers)
+
+        # Largura do nome do aluno: nome mais longo da lista + 20 pixels
+        font_metrics = self.tbl_results.fontMetrics()
+        max_name_px = font_metrics.horizontalAdvance("Nome do Aluno")
+        for r in self.current_results:
+            w = font_metrics.horizontalAdvance(str(r.get("aluno_nome", "")))
+            if w > max_name_px:
+                max_name_px = w
+        aluno_col_width = max_name_px + 20
+
+        # Modos de redimensionamento das colunas
+        header = self.tbl_results.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # Matrícula
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)     # Nome do Aluno
+        self.tbl_results.setColumnWidth(1, aluno_col_width)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # Turma
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Tipo
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # Acertos
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents) # % Acertos
+
+        c_idx = 6
+        for _ in disc_list:
+            header.setSectionResizeMode(c_idx, QHeaderView.ResizeMode.ResizeToContents)
+            c_idx += 1
+
+        header.setSectionResizeMode(c_idx, QHeaderView.ResizeMode.ResizeToContents) # Nota Final
+        c_idx += 1
+        header.setSectionResizeMode(c_idx, QHeaderView.ResizeMode.Fixed)     # Ação (Boletim Individual)
+        self.tbl_results.setColumnWidth(c_idx, 160)
 
         self.tbl_results.setRowCount(len(self.current_results))
         for row_idx, r in enumerate(self.current_results):

@@ -198,15 +198,18 @@ class ReportExporter:
             row.append(Paragraph(f"<b>{r.get('nota_final', 0.0):.2f}</b>", table_cell_style))
             table_data.append(row)
 
-        # Calcular larguras para Landscape A4
+        # Calcular larguras para Landscape A4 (Coluna de Aluno ajustada ao tamanho do maior nome)
+        max_name_len = max([len(str(r.get("aluno_nome", ""))) for r in results], default=15)
+        aluno_col_w = max(3.8 * cm, min(7.5 * cm, (max_name_len * 0.18 + 0.8) * cm))
+
         num_disc = len(disc_list)
-        fixed_width = 17.1 * cm
+        fixed_width = 2.0 * cm + aluno_col_w + 1.8 * cm + 1.2 * cm + 1.8 * cm + 1.8 * cm + 2.2 * cm
         avail_disc_space = 27.3 * cm - fixed_width
         disc_width = (avail_disc_space / num_disc) if num_disc > 0 else 2.0 * cm
         if disc_width < 1.5 * cm:
             disc_width = 1.5 * cm
 
-        col_widths = [2.0 * cm, 6.5 * cm, 1.8 * cm, 1.2 * cm, 1.8 * cm, 1.8 * cm] + [disc_width] * num_disc + [2.2 * cm]
+        col_widths = [2.0 * cm, aluno_col_w, 1.8 * cm, 1.2 * cm, 1.8 * cm, 1.8 * cm] + [disc_width] * num_disc + [2.2 * cm]
 
         t = Table(table_data, colWidths=col_widths, repeatRows=1)
         t.setStyle(TableStyle([
@@ -273,22 +276,29 @@ class ReportExporter:
         story = []
 
         # Cabeçalho do Boletim
-        story.append(Paragraph(f"Boletim Individual - {exam_info.get('nome', 'Prova')}", title_style))
+        e_nome = exam_info.get('nome', 'Prova') if exam_info else "Histórico do Aluno"
+        story.append(Paragraph(f"Boletim Individual - {e_nome}", title_style))
         story.append(Spacer(1, 10))
 
         # Card do Aluno
+        n_final = result.get('nota_final', 0.0) if result else 0.0
+        v_tot = exam_info.get('valor_total', 10.0) if exam_info else 10.0
+        pct_ac = result.get('percentual_acertos', 0.0) if result else 0.0
+        tot_ac = result.get('total_acertos', 0) if result else 0
+        tot_q = result.get('total_questoes', 0) if result else 0
+
         info_data = [
             [
                 Paragraph(f"<b>Aluno:</b> <nobr>{student_info.get('nome', 'N/A')}</nobr>", body_style),
-                Paragraph(f"<b>Matrícula:</b> {result.get('aluno_matricula', 'N/A')}", body_style)
+                Paragraph(f"<b>Matrícula:</b> {student_info.get('matricula', result.get('aluno_matricula', 'N/A'))}", body_style)
             ],
             [
                 Paragraph(f"<b>Turma:</b> {student_info.get('turma', 'N/A')}", body_style),
-                Paragraph(f"<b>Tipo da Prova:</b> {result.get('tipo_prova', 'N/A')}", body_style)
+                Paragraph(f"<b>Tipo da Prova:</b> {result.get('tipo_prova', 'N/A') if result else 'N/A'}", body_style)
             ],
             [
-                Paragraph(f"<b>Nota Final da Prova:</b> <font size=12 color='#00A9A4'><b>{result.get('nota_final', 0.0):.2f}</b> / {exam_info.get('valor_total', 10.0)}</font>", body_style),
-                Paragraph(f"<b>Aproveitamento Geral:</b> {result.get('percentual_acertos', 0.0):.1f}% ({result.get('total_acertos', 0)}/{result.get('total_questoes', 0)} acertos)", body_style)
+                Paragraph(f"<b>Nota Final da Prova:</b> <font size=12 color='#00A9A4'><b>{n_final:.2f}</b> / {v_tot}</font>", body_style),
+                Paragraph(f"<b>Aproveitamento Geral:</b> {pct_ac:.1f}% ({tot_ac}/{tot_q} acertos)", body_style)
             ]
         ]
         info_table = Table(info_data, colWidths=[9 * cm, 9 * cm])
@@ -308,7 +318,7 @@ class ReportExporter:
         disc_headers = ["Disciplina", "Acertos", "Total Questões", "% Acertos", "Nota Disciplina"]
         disc_table_data = [[Paragraph(h, header_style) for h in disc_headers]]
 
-        detalhes = result.get("detalhes_disciplinas", {})
+        detalhes = result.get("detalhes_disciplinas", {}) if result else {}
         for disc_name, disc_data in detalhes.items():
             if disc_name.strip().lower() == "geral":
                 continue
@@ -340,6 +350,103 @@ class ReportExporter:
             return NumberedCanvas(*args, logo_path=logo_path, watermark_text=watermark, **kwargs)
 
         doc.build(story, canvasmaker=make_canvas)
+
+    # --- GERAR EXCEL INDIVIDUAL DO ALUNO ---
+    def export_individual_excel(self, student_info: Dict[str, Any], stats_or_result: Dict[str, Any], output_path: str):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Boletim Aluno"
+
+        header_fill = PatternFill(start_color="242D64", end_color="242D64", fill_type="solid")
+        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        title_font = Font(name="Calibri", size=14, bold=True, color="242D64")
+        subtitle_font = Font(name="Calibri", size=10, italic=True, color="64748B")
+        center_align = Alignment(horizontal="center", vertical="center")
+        left_align = Alignment(horizontal="left", vertical="center")
+        thin_border = Border(
+            left=Side(style='thin', color='CBD5E1'), right=Side(style='thin', color='CBD5E1'),
+            top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1')
+        )
+
+        ws.append([f"Boletim Individual do Aluno: {student_info.get('nome', '')}"])
+        ws.cell(row=1, column=1).font = title_font
+        ws.append([f"Matrícula: {student_info.get('matricula', '')} | Turma: {student_info.get('turma', '')}"])
+        ws.cell(row=2, column=1).font = subtitle_font
+        ws.append([])
+
+        history = stats_or_result.get("historico", [])
+        if not history and "nota_final" in stats_or_result:
+            history = [stats_or_result]
+
+        headers = ["Data Prova", "Nome da Prova", "Tipo", "Acertos", "% Acertos", "Nota Final", "Status"]
+        ws.append(headers)
+        h_row = 4
+        for c_idx in range(1, len(headers) + 1):
+            cell = ws.cell(row=h_row, column=c_idx)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = center_align
+
+        for h in history:
+            row_data = [
+                h.get("prova_data", "N/A"),
+                h.get("prova_nome", "Prova"),
+                h.get("tipo_prova", "N/A"),
+                f"{h.get('total_acertos', 0)}/{h.get('total_questoes', 0)}",
+                f"{h.get('percentual_acertos', 0.0):.1f}%",
+                h.get("nota_final", 0.0),
+                h.get("status_presenca", "Presente")
+            ]
+            ws.append(row_data)
+            curr = ws.max_row
+            for c_idx in range(1, len(row_data) + 1):
+                c = ws.cell(row=curr, column=c_idx)
+                c.border = thin_border
+                c.alignment = center_align if c_idx in [1, 3, 4, 5, 6, 7] else left_align
+
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or '')) for cell in col)
+            col_letter = openpyxl.utils.get_column_letter(col[0].column)
+            ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+        wb.save(output_path)
+
+    # --- GERAR WORD INDIVIDUAL DO ALUNO ---
+    def export_individual_word(self, student_info: Dict[str, Any], stats_or_result: Dict[str, Any], output_path: str):
+        doc = docx.Document()
+        h1 = doc.add_heading(level=1)
+        run = h1.add_run(f"Boletim Individual: {student_info.get('nome', '')}")
+        run.font.color.rgb = RGBColor(0x24, 0x2D, 0x64)
+
+        p = doc.add_paragraph()
+        p.add_run(f"Matrícula: {student_info.get('matricula', '')} | Turma: {student_info.get('turma', '')}\n")
+
+        history = stats_or_result.get("historico", [])
+        if not history and "nota_final" in stats_or_result:
+            history = [stats_or_result]
+
+        headers = ["Data Prova", "Nome da Prova", "Tipo", "Acertos", "% Acertos", "Nota Final", "Status"]
+        table = doc.add_table(rows=1, cols=len(headers))
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        table.style = 'Table Grid'
+
+        hdr_cells = table.rows[0].cells
+        for i, h in enumerate(headers):
+            hdr_cells[i].text = h
+            hdr_cells[i].paragraphs[0].runs[0].font.bold = True
+            hdr_cells[i].paragraphs[0].runs[0].font.color.rgb = RGBColor(0x24, 0x2D, 0x64)
+
+        for h in history:
+            row_cells = table.add_row().cells
+            row_cells[0].text = str(h.get("prova_data", "N/A"))
+            row_cells[1].text = str(h.get("prova_nome", "N/A"))
+            row_cells[2].text = str(h.get("tipo_prova", "N/A"))
+            row_cells[3].text = f"{h.get('total_acertos', 0)}/{h.get('total_questoes', 0)}"
+            row_cells[4].text = f"{h.get('percentual_acertos', 0.0):.1f}%"
+            row_cells[5].text = f"{h.get('nota_final', 0.0):.2f}"
+            row_cells[6].text = str(h.get("status_presenca", "Presente"))
+
+        doc.save(output_path)
 
     # --- EXPORTAR PARA EXCEL ---
     def export_exam_excel(self, exam: Dict[str, Any], results: List[Dict[str, Any]], output_path: str, turma_subtitle: str = "Geral - Todas as Turmas"):

@@ -165,11 +165,74 @@ class StudentDetailDialog(QDialog):
 
         layout.addWidget(tabs)
 
+        # Bottom Bar: Export Options & Close
+        h_bottom = QHBoxLayout()
+
+        btn_pdf = QPushButton("Exportar PDF (Boletim)")
+        btn_pdf.setIcon(qta.icon('fa5s.file-pdf', color='white'))
+        btn_pdf.setObjectName("btnNavy")
+        btn_pdf.clicked.connect(self.export_pdf)
+
+        btn_excel = QPushButton("Exportar Excel (.xlsx)")
+        btn_excel.setIcon(qta.icon('fa5s.file-excel', color='#242D64'))
+        btn_excel.setObjectName("btnSecondary")
+        btn_excel.clicked.connect(self.export_excel)
+
+        btn_word = QPushButton("Exportar Word (.docx)")
+        btn_word.setIcon(qta.icon('fa5s.file-word', color='#242D64'))
+        btn_word.setObjectName("btnSecondary")
+        btn_word.clicked.connect(self.export_word)
+
         btn_close = QPushButton("Fechar")
         btn_close.setIcon(qta.icon('fa5s.times', color='#242D64'))
         btn_close.setObjectName("btnSecondary")
         btn_close.clicked.connect(self.accept)
-        layout.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignRight)
+
+        h_bottom.addWidget(btn_pdf)
+        h_bottom.addWidget(btn_excel)
+        h_bottom.addWidget(btn_word)
+        h_bottom.addStretch()
+        h_bottom.addWidget(btn_close)
+
+        layout.addLayout(h_bottom)
+
+    def export_pdf(self):
+        from services.exporter import ReportExporter
+        exporter = ReportExporter()
+        filename = f"Boletim_{self.student.get('nome', 'Aluno').replace(' ', '_')}.pdf"
+        filepath, _ = QFileDialog.getSaveFileName(self, "Salvar Boletim PDF", filename, "Arquivos PDF (*.pdf)")
+        if filepath:
+            try:
+                history = self.stats.get("historico", [])
+                last_result = history[0] if history else {}
+                exporter.export_individual_pdf(self.student, {}, last_result, filepath)
+                QMessageBox.information(self, "Sucesso", f"Boletim PDF exportado com sucesso!\n{filepath}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Erro ao gerar PDF do Boletim:\n{str(e)}")
+
+    def export_excel(self):
+        from services.exporter import ReportExporter
+        exporter = ReportExporter()
+        filename = f"Boletim_{self.student.get('nome', 'Aluno').replace(' ', '_')}.xlsx"
+        filepath, _ = QFileDialog.getSaveFileName(self, "Salvar Boletim Excel", filename, "Arquivos Excel (*.xlsx)")
+        if filepath:
+            try:
+                exporter.export_individual_excel(self.student, self.stats, filepath)
+                QMessageBox.information(self, "Sucesso", f"Boletim Excel exportado com sucesso!\n{filepath}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Erro ao gerar Excel do Boletim:\n{str(e)}")
+
+    def export_word(self):
+        from services.exporter import ReportExporter
+        exporter = ReportExporter()
+        filename = f"Boletim_{self.student.get('nome', 'Aluno').replace(' ', '_')}.docx"
+        filepath, _ = QFileDialog.getSaveFileName(self, "Salvar Boletim Word", filename, "Arquivos Word (*.docx)")
+        if filepath:
+            try:
+                exporter.export_individual_word(self.student, self.stats, filepath)
+                QMessageBox.information(self, "Sucesso", f"Boletim Word exportado com sucesso!\n{filepath}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Erro ao gerar Word do Boletim:\n{str(e)}")
 
 
 class StudentsTab(QWidget):
