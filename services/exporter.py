@@ -90,7 +90,7 @@ class ReportExporter:
         return logo_path, watermark
 
     # --- GERAR PDF DA PROVA (GERAL - MODO PAISAGEM / LANDSCAPE) ---
-    def export_exam_pdf(self, exam: Dict[str, Any], results: List[Dict[str, Any]], output_path: str):
+    def export_exam_pdf(self, exam: Dict[str, Any], results: List[Dict[str, Any]], output_path: str, turma_subtitle: str = "Geral - Todas as Turmas"):
         logo_path, watermark = self._get_branding()
         
         doc = SimpleDocTemplate(
@@ -155,20 +155,21 @@ class ReportExporter:
 
         story = []
 
-        # Título
+        # Título e Subtítulo por Turma
         story.append(Paragraph(f"Relatório de Resultados - {exam.get('nome', 'Prova')}", title_style))
-        story.append(Paragraph(f"Data: {exam.get('data', 'N/A')} | Bloco(s): {exam.get('bloco_nome') or 'Geral'} | Valor Total da Prova: {exam.get('valor_total', 10.0)} pts | Total de Alunos Processados: {len(results)}", subtitle_style))
+        story.append(Paragraph(f"<b>Turma:</b> {turma_subtitle} | Data: {exam.get('data', 'N/A')} | Bloco(s): {exam.get('bloco_nome') or 'Geral'} | Valor Total: {exam.get('valor_total', 10.0)} pts | Alunos Processados: {len(results)}", subtitle_style))
         story.append(Spacer(1, 12))
 
-        # Obter todas as disciplinas dos resultados
+        # Obter todas as disciplinas dos resultados (Removendo 'Geral')
         disc_set = set()
         for r in results:
             det = r.get("detalhes_disciplinas", {})
             for d_name in det.keys():
-                disc_set.add(d_name)
+                if d_name.strip().lower() != "geral":
+                    disc_set.add(d_name)
         disc_list = sorted(list(disc_set))
 
-        # Cabeçalhos da Tabela PDF (Simplificados sem 'Nota' ou '(0-10)')
+        # Cabeçalhos da Tabela PDF
         headers = ["Matrícula", "Aluno", "Turma", "Tipo", "Acertos", "% Acertos"]
         for d in disc_list:
             headers.append(d)
@@ -197,9 +198,9 @@ class ReportExporter:
             row.append(Paragraph(f"<b>{r.get('nota_final', 0.0):.2f}</b>", table_cell_style))
             table_data.append(row)
 
-        # Calcular larguras para Landscape A4 (largura total disponível: 27.3 cm)
+        # Calcular larguras para Landscape A4
         num_disc = len(disc_list)
-        fixed_width = 17.1 * cm  # Matrícula (2.0) + Aluno (6.5) + Turma (1.8) + Tipo (1.2) + Acertos (1.8) + % Acertos (1.8) + Nota Final (2.2)
+        fixed_width = 17.1 * cm
         avail_disc_space = 27.3 * cm - fixed_width
         disc_width = (avail_disc_space / num_disc) if num_disc > 0 else 2.0 * cm
         if disc_width < 1.5 * cm:
@@ -309,6 +310,8 @@ class ReportExporter:
 
         detalhes = result.get("detalhes_disciplinas", {})
         for disc_name, disc_data in detalhes.items():
+            if disc_name.strip().lower() == "geral":
+                continue
             ac = disc_data.get("acertos", 0)
             tot = disc_data.get("total", 0)
             pct = disc_data.get("percentual", 0.0)
@@ -339,7 +342,7 @@ class ReportExporter:
         doc.build(story, canvasmaker=make_canvas)
 
     # --- EXPORTAR PARA EXCEL ---
-    def export_exam_excel(self, exam: Dict[str, Any], results: List[Dict[str, Any]], output_path: str):
+    def export_exam_excel(self, exam: Dict[str, Any], results: List[Dict[str, Any]], output_path: str, turma_subtitle: str = "Geral - Todas as Turmas"):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Resultados"
@@ -359,7 +362,7 @@ class ReportExporter:
 
         ws.append([f"Relatório de Prova: {exam.get('nome', '')}"])
         ws.cell(row=1, column=1).font = title_font
-        ws.append([f"Data: {exam.get('data', '')} | Bloco(s): {exam.get('bloco_nome', 'Geral')} | Total Alunos Processados: {len(results)} | Valor Total Prova: {exam.get('valor_total', 10.0)}"])
+        ws.append([f"Turma: {turma_subtitle} | Data: {exam.get('data', '')} | Bloco(s): {exam.get('bloco_nome', 'Geral')} | Total Alunos Processados: {len(results)} | Valor Total Prova: {exam.get('valor_total', 10.0)}"])
         ws.cell(row=2, column=1).font = subtitle_font
         ws.append([])
 
@@ -367,7 +370,8 @@ class ReportExporter:
         for r in results:
             det = r.get("detalhes_disciplinas", {})
             for d in det.keys():
-                disciplinas_set.add(d)
+                if d.strip().lower() != "geral":
+                    disciplinas_set.add(d)
         disciplinas_list = sorted(list(disciplinas_set))
 
         headers = ["Matrícula", "Aluno", "Turma", "Tipo Prova", "Total Acertos", "Total Questões", "% Acertos"]
@@ -429,7 +433,7 @@ class ReportExporter:
         wb.save(output_path)
 
     # --- EXPORTAR PARA WORD ---
-    def export_exam_word(self, exam: Dict[str, Any], results: List[Dict[str, Any]], output_path: str):
+    def export_exam_word(self, exam: Dict[str, Any], results: List[Dict[str, Any]], output_path: str, turma_subtitle: str = "Geral - Todas as Turmas"):
         doc = docx.Document()
         
         h1 = doc.add_heading(level=1)
@@ -437,6 +441,7 @@ class ReportExporter:
         run.font.color.rgb = RGBColor(0x24, 0x2D, 0x64)
 
         p = doc.add_paragraph()
+        p.add_run(f"Turma: {turma_subtitle}\n")
         p.add_run(f"Data: {exam.get('data', '')} | Bloco(s): {exam.get('bloco_nome') or 'Geral'} | Valor Total Prova: {exam.get('valor_total', 10.0)} pts\n")
         p.add_run(f"Total de Alunos Processados: {len(results)}")
 
@@ -446,7 +451,8 @@ class ReportExporter:
         for r in results:
             det = r.get("detalhes_disciplinas", {})
             for d in det.keys():
-                disciplinas_set.add(d)
+                if d.strip().lower() != "geral":
+                    disciplinas_set.add(d)
         disciplinas_list = sorted(list(disciplinas_set))
 
         headers = ["Matrícula", "Aluno", "Turma", "Tipo", "Acertos", "% Acertos"]

@@ -149,6 +149,12 @@ class ReportsTab(QWidget):
         if idx >= 0:
             self.combo_exam.setCurrentIndex(idx)
 
+    def get_current_turma_subtitle(self) -> str:
+        turma_val = self.combo_turma.currentData()
+        if not turma_val or turma_val == "Todas":
+            return "Geral - Todas as Turmas"
+        return str(turma_val)
+
     def load_results(self):
         exam_id = self.combo_exam.currentData()
         if not exam_id:
@@ -169,12 +175,13 @@ class ReportsTab(QWidget):
 
         self.update_cards(self.current_results)
 
-        # Identificar disciplinas dos resultados
+        # Identificar disciplinas dos resultados (Removendo 'Geral')
         disc_set = set()
         for r in self.current_results:
             det = r.get("detalhes_disciplinas", {})
             for d_name in det.keys():
-                disc_set.add(d_name)
+                if d_name.strip().lower() != "geral":
+                    disc_set.add(d_name)
         disc_list = sorted(list(disc_set))
 
         # Reconfigurar cabeçalhos dinamicamente
@@ -217,8 +224,9 @@ class ReportsTab(QWidget):
             self.tbl_results.setCellWidget(row_idx, col_curr, btn_view)
 
     def update_cards(self, results: list):
+        turma_sub = self.get_current_turma_subtitle()
         if not results:
-            self.lbl_card_avg.setText("<b>Média da Turma:</b> -")
+            self.lbl_card_avg.setText(f"<b>Turma:</b> {turma_sub}<br><b>Média:</b> -")
             self.lbl_card_max.setText("<b>Maior Nota:</b> -")
             self.lbl_card_min.setText("<b>Menor Nota:</b> -")
             self.lbl_card_count.setText("<b>Total Alunos:</b> 0")
@@ -229,7 +237,7 @@ class ReportsTab(QWidget):
         max_n = max(notas)
         min_n = min(notas)
 
-        self.lbl_card_avg.setText(f"<b>Média da Turma:</b> <font color='#00A9A4'><b>{avg:.2f}</b></font>")
+        self.lbl_card_avg.setText(f"<b>Turma:</b> {turma_sub}<br><b>Média:</b> <font color='#00A9A4'><b>{avg:.2f}</b></font>")
         self.lbl_card_max.setText(f"<b>Maior Nota:</b> <font color='#10B981'><b>{max_n:.2f}</b></font>")
         self.lbl_card_min.setText(f"<b>Menor Nota:</b> <font color='#EF4444'><b>{min_n:.2f}</b></font>")
         self.lbl_card_count.setText(f"<b>Total Alunos:</b> {len(results)}")
@@ -256,7 +264,10 @@ class ReportsTab(QWidget):
         filepath, _ = QFileDialog.getSaveFileName(self, "Salvar Relatório PDF", filename, "Arquivos PDF (*.pdf)")
         if filepath:
             try:
-                self.exporter.export_exam_pdf(self.current_exam, self.current_results, filepath)
+                self.exporter.export_exam_pdf(
+                    self.current_exam, self.current_results, filepath,
+                    turma_subtitle=self.get_current_turma_subtitle()
+                )
                 QMessageBox.information(self, "Sucesso", f"Relatório PDF exportado com sucesso!\n{filepath}")
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Erro ao gerar PDF:\n{str(e)}")
@@ -270,7 +281,10 @@ class ReportsTab(QWidget):
         filepath, _ = QFileDialog.getSaveFileName(self, "Salvar Planilha Excel", filename, "Arquivos Excel (*.xlsx)")
         if filepath:
             try:
-                self.exporter.export_exam_excel(self.current_exam, self.current_results, filepath)
+                self.exporter.export_exam_excel(
+                    self.current_exam, self.current_results, filepath,
+                    turma_subtitle=self.get_current_turma_subtitle()
+                )
                 QMessageBox.information(self, "Sucesso", f"Planilha Excel exportada com sucesso!\n{filepath}")
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Erro ao gerar Excel:\n{str(e)}")
@@ -284,7 +298,10 @@ class ReportsTab(QWidget):
         filepath, _ = QFileDialog.getSaveFileName(self, "Salvar Documento Word", filename, "Arquivos Word (*.docx)")
         if filepath:
             try:
-                self.exporter.export_exam_word(self.current_exam, self.current_results, filepath)
+                self.exporter.export_exam_word(
+                    self.current_exam, self.current_results, filepath,
+                    turma_subtitle=self.get_current_turma_subtitle()
+                )
                 QMessageBox.information(self, "Sucesso", f"Documento Word exportado com sucesso!\n{filepath}")
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Erro ao gerar Word:\n{str(e)}")
@@ -299,7 +316,9 @@ class ReportsTab(QWidget):
         dialog = QPrintDialog(printer, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             doc = QTextDocument()
+            turma_sub = self.get_current_turma_subtitle()
             html = f"<h2>Relatório de Prova: {self.current_exam['nome']}</h2>"
+            html += f"<h3>Subtítulo: {turma_sub}</h3>"
             html += f"<p><b>Data:</b> {self.current_exam['data']} | <b>Alunos Processados:</b> {len(self.current_results)}</p>"
             html += "<table border='1' cellspacing='0' cellpadding='5' width='100%'>"
             
@@ -307,7 +326,8 @@ class ReportsTab(QWidget):
             for r in self.current_results:
                 det = r.get("detalhes_disciplinas", {})
                 for d_name in det.keys():
-                    disc_set.add(d_name)
+                    if d_name.strip().lower() != "geral":
+                        disc_set.add(d_name)
             disc_list = sorted(list(disc_set))
 
             html += "<tr><th>Matrícula</th><th>Aluno</th><th>Turma</th><th>Tipo</th><th>Acertos</th><th>% Acertos</th>"
