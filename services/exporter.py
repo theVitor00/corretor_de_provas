@@ -1,6 +1,8 @@
 import os
 from typing import List, Dict, Any, Optional, Tuple
 from database import Database, db as default_db
+from models.subject import SubjectBlockModel
+from services.abbreviations import get_acronym
 
 # ReportLab imports for PDF
 from reportlab.lib.pagesizes import letter, A4, landscape
@@ -21,6 +23,7 @@ import docx
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.section import WD_ORIENT
 
 class NumberedCanvas(canvas.Canvas):
     def __init__(self, *args, logo_path: Optional[str] = None, watermark_text: Optional[str] = None, **kwargs):
@@ -59,47 +62,72 @@ class NumberedCanvas(canvas.Canvas):
         # Cabeçalho decorativo
         self.setStrokeColor(colors.HexColor("#00A9A4"))
         self.setLineWidth(1.5)
-        self.line(1.5 * cm, ph - 1.5 * cm, pw - 1.5 * cm, ph - 1.5 * cm)
+        self.line(1.0 * cm, ph - 1.2 * cm, pw - 1.0 * cm, ph - 1.2 * cm)
 
         # Logotipo no cabeçalho se existir
-        if self.logo_path and os.path.exists(self.logo_path):
+        logo_to_use = self.logo_path
+        if not logo_to_use or not os.path.exists(logo_to_use):
+            if os.path.exists("logo.png"):
+                logo_to_use = "logo.png"
+
+        if logo_to_use and os.path.exists(logo_to_use):
             try:
-                self.drawImage(self.logo_path, pw - 4.5 * cm, ph - 1.4 * cm, width=3 * cm, height=1 * cm, preserveAspectRatio=True, mask='auto')
+                self.drawImage(logo_to_use, pw - 3.8 * cm, ph - 1.1 * cm, width=2.6 * cm, height=0.9 * cm, preserveAspectRatio=True, mask='auto')
             except Exception:
                 pass
 
         # Rodapé
-        self.setFont("Helvetica", 9)
+        self.setFont("Helvetica", 8)
         self.setFillColor(colors.HexColor("#64748B"))
         self.setStrokeColor(colors.HexColor("#CBD5E1"))
         self.setLineWidth(0.5)
-        self.line(1.5 * cm, 1.8 * cm, pw - 1.5 * cm, 1.8 * cm)
+        self.line(1.0 * cm, 1.4 * cm, pw - 1.0 * cm, 1.4 * cm)
 
-        self.drawString(1.5 * cm, 1.2 * cm, "Corretor de Provas - Relatório Oficial")
-        self.drawRightString(pw - 1.5 * cm, 1.2 * cm, f"Página {self._pageNumber} de {page_count}")
+        self.drawString(1.0 * cm, 0.9 * cm, "Corretor de Provas - Relatório Oficial")
+        self.drawRightString(pw - 1.0 * cm, 0.9 * cm, f"Página {self._pageNumber} de {page_count}")
         self.restoreState()
 
 
 class ReportExporter:
     def __init__(self, db: Database = default_db):
         self.db = db
+        self.subject_model = SubjectBlockModel(db)
 
     def _get_branding(self) -> Tuple[Optional[str], Optional[str]]:
         logo_path = self.db.get_config("logo_path")
+        if not logo_path or not os.path.exists(logo_path):
+            if os.path.exists("logo.png"):
+                logo_path = "logo.png"
         watermark = self.db.get_config("watermark_text", "CORRETOR DE PROVAS")
         return logo_path, watermark
 
-    # --- GERAR PDF DA PROVA (GERAL - MODO PAISAGEM / LANDSCAPE) ---
-    def export_exam_pdf(self, exam: Dict[str, Any], results: List[Dict[str, Any]], output_path: str, turma_subtitle: str = "Geral - Todas as Turmas"):
+    def _get_block_mapping(self, exam: Dict[str, Any]) -> Tuple[Dict[str, str], List[str]]:
+        disc_db = {d["nome"].strip().lower(): d.get("bloco_nome") for d in self.subject_model.list_subjects()}
+        blocos_list = exam.get("blocos_list", [])
+        exam_block_names = [b["nome"] for b in blocos_list] if blocos_list else []
+        return disc_db, exam_block_names
+
+    # --- GERAR PDF DA PROVA (DISCIPLINA EM LANDSCAPE / GERAL E BLOCO EM PORTRAIT) ---
+    def export_exam_pdf(
+        self, 
+        exam: Dict[str, Any], 
+        results: List[Dict[str, Any]], 
+        output_path: str, 
+        turma_subtitle: str = "Geral - Todas as Turmas",
+        view_mode: str = "geral"
+    ):
         logo_path, watermark = self._get_branding()
         
+        is_landscape = (view_mode == "disciplina")
+        pagesize = landscape(A4) if is_landscape else A4
+
         doc = SimpleDocTemplate(
             output_path,
-            pagesize=landscape(A4),
-            leftMargin=1.2 * cm,
-            rightMargin=1.2 * cm,
-            topMargin=2.0 * cm,
-            bottomMargin=2.2 * cm
+            pagesize=pagesize,
+            leftMargin=1.2 * cm if is_landscape else 1.0 * cm,
+            rightMargin=1.2 * cm if is_landscape else 1.0 * cm,
+            topMargin=1.6 * cm,
+            bottomMargin=1.8 * cm
         )
 
         styles = getSampleStyleSheet()
@@ -108,8 +136,8 @@ class ReportExporter:
             "CustomTitle",
             parent=styles["Title"],
             fontName="Helvetica-Bold",
-            fontSize=16,
-            leading=20,
+            fontSize=14,
+            leading=17,
             textColor=colors.HexColor("#242D64"),
             alignment=0
         )
@@ -118,8 +146,8 @@ class ReportExporter:
             "CustomSubTitle",
             parent=styles["Normal"],
             fontName="Helvetica",
-            fontSize=9.5,
-            leading=13,
+            fontSize=8.5,
+            leading=11,
             textColor=colors.HexColor("#64748B")
         )
 
@@ -127,7 +155,17 @@ class ReportExporter:
             "TableHeader",
             parent=styles["Normal"],
             fontName="Helvetica-Bold",
-            fontSize=8,
+            fontSize=7.5,
+            leading=9,
+            textColor=colors.white,
+            alignment=1
+        )
+
+        table_header_top_style = ParagraphStyle(
+            "TableHeaderTop",
+            parent=styles["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=8.5,
             leading=10,
             textColor=colors.white,
             alignment=1
@@ -137,8 +175,8 @@ class ReportExporter:
             "TableCell",
             parent=styles["Normal"],
             fontName="Helvetica",
-            fontSize=8,
-            leading=10,
+            fontSize=7.5,
+            leading=9,
             textColor=colors.HexColor("#1E293B"),
             alignment=1
         )
@@ -147,8 +185,8 @@ class ReportExporter:
             "TableCellStudent",
             parent=styles["Normal"],
             fontName="Helvetica",
-            fontSize=8,
-            leading=10,
+            fontSize=7.5,
+            leading=9,
             textColor=colors.HexColor("#1E293B"),
             alignment=0
         )
@@ -156,72 +194,130 @@ class ReportExporter:
         story = []
 
         # Título e Subtítulo por Turma
-        story.append(Paragraph(f"Relatório de Resultados - {exam.get('nome', 'Prova')}", title_style))
+        mode_label = view_mode.upper()
+        story.append(Paragraph(f"Relatório de Resultados - {exam.get('nome', 'Prova')} (Modo: {mode_label})", title_style))
         story.append(Paragraph(f"<b>Turma:</b> {turma_subtitle} | Data: {exam.get('data', 'N/A')} | Bloco(s): {exam.get('bloco_nome') or 'Geral'} | Valor Total: {exam.get('valor_total', 10.0)} pts | Alunos Processados: {len(results)}", subtitle_style))
-        story.append(Spacer(1, 12))
+        story.append(Spacer(1, 10))
 
-        # Obter todas as disciplinas dos resultados (Removendo 'Geral')
-        disc_set = set()
+        disc_db_map, exam_blocks = self._get_block_mapping(exam)
+        mapped_subjects = exam.get("layout_config", {}).get("subjects", [])
+        exam_disc_list = []
+        for s in mapped_subjects:
+            n = s.get("nome", "").strip()
+            if n and n.lower() != "geral" and n not in exam_disc_list:
+                exam_disc_list.append(n)
+
+        if not exam_disc_list:
+            disc_set = set()
+            for r in results:
+                det = r.get("detalhes_disciplinas", {})
+                for d_name in det.keys():
+                    if d_name.strip().lower() != "geral":
+                        disc_set.add(d_name.strip())
+            exam_disc_list = sorted(list(disc_set))
+
+        if view_mode in ["geral", "bloco"]:
+            block_set = set(exam_blocks) if exam_blocks else {disc_db_map.get(d.lower()) or "Geral" for d in exam_disc_list}
+            mid_full = sorted(list(block_set))
+            group_title = "Acertos" if view_mode == "geral" else "Notas"
+        else:
+            mid_full = exam_disc_list
+            group_title = "Notas"
+
+        mid_siglas = [get_acronym(m) for m in mid_full]
+        num_mid = len(mid_siglas)
+
+        # Construir Tabela com Cabeçalho de 2 Linhas
+        total_cols = 4 + num_mid + 1
+        row1 = [Paragraph(f"<b>{group_title}</b>", table_header_top_style)] + [Paragraph("", table_header_style) for _ in range(total_cols - 1)]
+
+        row2 = [
+            Paragraph("Matrícula", table_header_style),
+            Paragraph("Aluno", table_header_style),
+            Paragraph("Turma", table_header_style),
+            Paragraph("Tipo", table_header_style),
+        ]
+        for sig in mid_siglas:
+            row2.append(Paragraph(sig, table_header_style))
+
+        if view_mode == "geral":
+            row2.append(Paragraph("Total", table_header_style))
+        else:
+            row2.append(Paragraph("Nota Final", table_header_style))
+
+        table_data = [row1, row2]
+
         for r in results:
             det = r.get("detalhes_disciplinas", {})
-            for d_name in det.keys():
-                if d_name.strip().lower() != "geral":
-                    disc_set.add(d_name)
-        disc_list = sorted(list(disc_set))
-
-        # Cabeçalhos da Tabela PDF
-        headers = ["Matrícula", "Aluno", "Turma", "Tipo", "Acertos", "% Acertos"]
-        for d in disc_list:
-            headers.append(d)
-        headers.append("Nota Final")
-
-        table_data = [[Paragraph(h, table_header_style) for h in headers]]
-
-        for r in results:
-            det = r.get("detalhes_disciplinas", {})
-            aluno_nome = str(r.get("aluno_nome", "Aluno Não Cadastrado"))
+            aluno_nome = str(r.get("aluno_nome", "Aluno Não Cadastrado")).replace("\n", " ").replace("\r", "")
             row = [
                 Paragraph(str(r.get("aluno_matricula", "")), table_cell_style),
                 Paragraph(f"<nobr>{aluno_nome}</nobr>", table_cell_student_style),
                 Paragraph(str(r.get("aluno_turma", "N/A")), table_cell_style),
                 Paragraph(str(r.get("tipo_prova", "")), table_cell_style),
-                Paragraph(f"{r.get('total_acertos', 0)}/{r.get('total_questoes', 0)}", table_cell_style),
-                Paragraph(f"{r.get('percentual_acertos', 0.0):.1f}%", table_cell_style),
             ]
-            for d in disc_list:
-                d_info = det.get(d, {})
-                tot = d_info.get("total", 0)
-                ac = d_info.get("acertos", 0)
-                n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                row.append(Paragraph(f"{n_disc:.2f}", table_cell_style))
 
-            row.append(Paragraph(f"<b>{r.get('nota_final', 0.0):.2f}</b>", table_cell_style))
+            if view_mode == "geral":
+                for b_name in mid_full:
+                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                    row.append(Paragraph(str(b_ac), table_cell_style))
+                row.append(Paragraph(f"{r.get('total_acertos', 0)}/{r.get('total_questoes', 0)}", table_cell_style))
+
+            elif view_mode == "bloco":
+                for b_name in mid_full:
+                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                    b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                    b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
+                    row.append(Paragraph(f"{b_nota:.2f}", table_cell_style))
+                row.append(Paragraph(f"<b>{r.get('nota_final', 0.0):.2f}</b>", table_cell_style))
+
+            else: # view_mode == "disciplina"
+                for d_name in mid_full:
+                    d_info = det.get(d_name)
+                    if not d_info:
+                        for k, v in det.items():
+                            if k.strip().lower() == d_name.strip().lower():
+                                d_info = v
+                                break
+                    if not d_info:
+                        d_info = {}
+                    tot = d_info.get("total", 0)
+                    ac = d_info.get("acertos", 0)
+                    n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                    row.append(Paragraph(f"{n_disc:.2f}", table_cell_style))
+                row.append(Paragraph(f"<b>{r.get('nota_final', 0.0):.2f}</b>", table_cell_style))
+
             table_data.append(row)
 
-        # Calcular larguras para Landscape A4 (Coluna de Aluno ajustada ao tamanho do maior nome)
+        # Ajuste de largura de colunas (Landscape = 27.3cm / Portrait = 19.0cm)
+        total_page_w = 27.3 * cm if is_landscape else 19.0 * cm
         max_name_len = max([len(str(r.get("aluno_nome", ""))) for r in results], default=15)
-        aluno_col_w = max(3.8 * cm, min(7.5 * cm, (max_name_len * 0.18 + 0.8) * cm))
+        max_name_w = 7.5 * cm if is_landscape else 5.5 * cm
+        aluno_col_w = max(3.2 * cm, min(max_name_w, (max_name_len * 0.16 + 0.6) * cm))
 
-        num_disc = len(disc_list)
-        fixed_width = 2.0 * cm + aluno_col_w + 1.8 * cm + 1.2 * cm + 1.8 * cm + 1.8 * cm + 2.2 * cm
-        avail_disc_space = 27.3 * cm - fixed_width
-        disc_width = (avail_disc_space / num_disc) if num_disc > 0 else 2.0 * cm
-        if disc_width < 1.5 * cm:
-            disc_width = 1.5 * cm
+        fixed_w = 1.8 * cm + aluno_col_w + 1.6 * cm + 1.2 * cm + 2.0 * cm
+        avail_space = total_page_w - fixed_w
+        mid_width = (avail_space / num_mid) if num_mid > 0 else 1.2 * cm
+        if mid_width < 1.0 * cm:
+            mid_width = 1.0 * cm
 
-        col_widths = [2.0 * cm, aluno_col_w, 1.8 * cm, 1.2 * cm, 1.8 * cm, 1.8 * cm] + [disc_width] * num_disc + [2.2 * cm]
+        col_widths = [1.8 * cm, aluno_col_w, 1.6 * cm, 1.2 * cm] + [mid_width] * num_mid + [2.0 * cm]
 
-        t = Table(table_data, colWidths=col_widths, repeatRows=1)
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#242D64")),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        t_style = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1E293B")),
+            ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor("#242D64")),
+            ('TEXTCOLOR', (0, 0), (-1, 1), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
-            ('TOPPADDING', (0, 0), (-1, 0), 5),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('SPAN', (0, 0), (-1, 0)),
+            ('ROWBACKGROUNDS', (0, 2), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
-        ]))
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ]
+
+        t = Table(table_data, colWidths=col_widths, repeatRows=2)
+        t.setStyle(TableStyle(t_style))
 
         story.append(t)
 
@@ -237,10 +333,10 @@ class ReportExporter:
         doc = SimpleDocTemplate(
             output_path,
             pagesize=A4,
-            leftMargin=1.5 * cm,
-            rightMargin=1.5 * cm,
-            topMargin=2.0 * cm,
-            bottomMargin=2.2 * cm
+            leftMargin=1.2 * cm,
+            rightMargin=1.2 * cm,
+            topMargin=1.8 * cm,
+            bottomMargin=2.0 * cm
         )
 
         styles = getSampleStyleSheet()
@@ -249,8 +345,8 @@ class ReportExporter:
             "IndTitle",
             parent=styles["Title"],
             fontName="Helvetica-Bold",
-            fontSize=16,
-            leading=20,
+            fontSize=15,
+            leading=18,
             textColor=colors.HexColor("#242D64"),
             alignment=0
         )
@@ -259,8 +355,8 @@ class ReportExporter:
             "IndBody",
             parent=styles["Normal"],
             fontName="Helvetica",
-            fontSize=9.5,
-            leading=13,
+            fontSize=9,
+            leading=12,
             textColor=colors.HexColor("#1E293B")
         )
 
@@ -268,7 +364,7 @@ class ReportExporter:
             "IndHeader",
             parent=styles["Normal"],
             fontName="Helvetica-Bold",
-            fontSize=9,
+            fontSize=8.5,
             textColor=colors.white,
             alignment=1
         )
@@ -281,6 +377,7 @@ class ReportExporter:
         story.append(Spacer(1, 10))
 
         # Card do Aluno
+        aluno_nome = str(student_info.get('nome', 'N/A')).replace("\n", " ").replace("\r", "")
         n_final = result.get('nota_final', 0.0) if result else 0.0
         v_tot = exam_info.get('valor_total', 10.0) if exam_info else 10.0
         pct_ac = result.get('percentual_acertos', 0.0) if result else 0.0
@@ -289,7 +386,7 @@ class ReportExporter:
 
         info_data = [
             [
-                Paragraph(f"<b>Aluno:</b> <nobr>{student_info.get('nome', 'N/A')}</nobr>", body_style),
+                Paragraph(f"<b>Aluno:</b> <nobr>{aluno_nome}</nobr>", body_style),
                 Paragraph(f"<b>Matrícula:</b> {student_info.get('matricula', result.get('aluno_matricula', 'N/A'))}", body_style)
             ],
             [
@@ -297,19 +394,19 @@ class ReportExporter:
                 Paragraph(f"<b>Tipo da Prova:</b> {result.get('tipo_prova', 'N/A') if result else 'N/A'}", body_style)
             ],
             [
-                Paragraph(f"<b>Nota Final da Prova:</b> <font size=12 color='#00A9A4'><b>{n_final:.2f}</b> / {v_tot}</font>", body_style),
+                Paragraph(f"<b>Nota Final da Prova:</b> <font size=11 color='#00A9A4'><b>{n_final:.2f}</b> / {v_tot}</font>", body_style),
                 Paragraph(f"<b>Aproveitamento Geral:</b> {pct_ac:.1f}% ({tot_ac}/{tot_q} acertos)", body_style)
             ]
         ]
-        info_table = Table(info_data, colWidths=[9 * cm, 9 * cm])
+        info_table = Table(info_data, colWidths=[9.3 * cm, 9.3 * cm])
         info_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
             ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#CBD5E1")),
             ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
-            ('PADDING', (0, 0), (-1, -1), 8),
+            ('PADDING', (0, 0), (-1, -1), 6),
         ]))
         story.append(info_table)
-        story.append(Spacer(1, 15))
+        story.append(Spacer(1, 12))
 
         # Detalhamento por Disciplina
         story.append(Paragraph("<b>Desempenho por Disciplina (Nota de 0 a 10 por disciplina)</b>", title_style))
@@ -335,14 +432,14 @@ class ReportExporter:
             ])
 
         if len(disc_table_data) > 1:
-            dt = Table(disc_table_data, colWidths=[6 * cm, 2.5 * cm, 2.5 * cm, 3 * cm, 4 * cm])
+            dt = Table(disc_table_data, colWidths=[6.6 * cm, 2.5 * cm, 2.5 * cm, 3 * cm, 4 * cm])
             dt.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#242D64")),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('ALIGN', (0, 1), (0, -1), 'LEFT'),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
-                ('PADDING', (0, 0), (-1, -1), 6),
+                ('PADDING', (0, 0), (-1, -1), 5),
             ]))
             story.append(dt)
 
@@ -356,6 +453,7 @@ class ReportExporter:
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Boletim Aluno"
+        ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
 
         header_fill = PatternFill(start_color="242D64", end_color="242D64", fill_type="solid")
         header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
@@ -368,7 +466,8 @@ class ReportExporter:
             top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1')
         )
 
-        ws.append([f"Boletim Individual do Aluno: {student_info.get('nome', '')}"])
+        aluno_nome = str(student_info.get('nome', '')).replace("\n", " ").replace("\r", "")
+        ws.append([f"Boletim Individual do Aluno: {aluno_nome}"])
         ws.cell(row=1, column=1).font = title_font
         ws.append([f"Matrícula: {student_info.get('matricula', '')} | Turma: {student_info.get('turma', '')}"])
         ws.cell(row=2, column=1).font = subtitle_font
@@ -414,8 +513,12 @@ class ReportExporter:
     # --- GERAR WORD INDIVIDUAL DO ALUNO ---
     def export_individual_word(self, student_info: Dict[str, Any], stats_or_result: Dict[str, Any], output_path: str):
         doc = docx.Document()
+        section = doc.sections[0]
+        section.orientation = WD_ORIENT.PORTRAIT
+
+        aluno_nome = str(student_info.get('nome', '')).replace("\n", " ").replace("\r", "")
         h1 = doc.add_heading(level=1)
-        run = h1.add_run(f"Boletim Individual: {student_info.get('nome', '')}")
+        run = h1.add_run(f"Boletim Individual: {aluno_nome}")
         run.font.color.rgb = RGBColor(0x24, 0x2D, 0x64)
 
         p = doc.add_paragraph()
@@ -448,72 +551,132 @@ class ReportExporter:
 
         doc.save(output_path)
 
-    # --- EXPORTAR PARA EXCEL ---
-    def export_exam_excel(self, exam: Dict[str, Any], results: List[Dict[str, Any]], output_path: str, turma_subtitle: str = "Geral - Todas as Turmas"):
+    # --- EXPORTAR PARA EXCEL (DISCIPLINA EM LANDSCAPE / OUTROS EM PORTRAIT) ---
+    def export_exam_excel(
+        self, 
+        exam: Dict[str, Any], 
+        results: List[Dict[str, Any]], 
+        output_path: str, 
+        turma_subtitle: str = "Geral - Todas as Turmas",
+        view_mode: str = "geral"
+    ):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Resultados"
+        if view_mode == "disciplina":
+            ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+        else:
+            ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
 
         header_fill = PatternFill(start_color="242D64", end_color="242D64", fill_type="solid")
+        header_group_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
         header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
         title_font = Font(name="Calibri", size=14, bold=True, color="242D64")
         subtitle_font = Font(name="Calibri", size=10, italic=True, color="64748B")
         center_align = Alignment(horizontal="center", vertical="center")
         left_align = Alignment(horizontal="left", vertical="center")
         thin_border = Border(
-            left=Side(style='thin', color='CBD5E1'),
-            right=Side(style='thin', color='CBD5E1'),
-            top=Side(style='thin', color='CBD5E1'),
-            bottom=Side(style='thin', color='CBD5E1')
+            left=Side(style='thin', color='CBD5E1'), right=Side(style='thin', color='CBD5E1'),
+            top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1')
         )
 
-        ws.append([f"Relatório de Prova: {exam.get('nome', '')}"])
+        ws.append([f"Relatório de Prova: {exam.get('nome', '')} (Modo: {view_mode.upper()})"])
         ws.cell(row=1, column=1).font = title_font
         ws.append([f"Turma: {turma_subtitle} | Data: {exam.get('data', '')} | Bloco(s): {exam.get('bloco_nome', 'Geral')} | Total Alunos Processados: {len(results)} | Valor Total Prova: {exam.get('valor_total', 10.0)}"])
         ws.cell(row=2, column=1).font = subtitle_font
         ws.append([])
 
-        disciplinas_set = set()
+        disc_db_map, exam_blocks = self._get_block_mapping(exam)
+        mapped_subjects = exam.get("layout_config", {}).get("subjects", [])
+        exam_disc_list = []
+        for s in mapped_subjects:
+            n = s.get("nome", "").strip()
+            if n and n.lower() != "geral" and n not in exam_disc_list:
+                exam_disc_list.append(n)
+
+        if not exam_disc_list:
+            disc_set = set()
+            for r in results:
+                det = r.get("detalhes_disciplinas", {})
+                for d in det.keys():
+                    if d.strip().lower() != "geral":
+                        disc_set.add(d.strip())
+            exam_disc_list = sorted(list(disc_set))
+
+        if view_mode in ["geral", "bloco"]:
+            block_set = set(exam_blocks) if exam_blocks else {disc_db_map.get(d.lower()) or "Geral" for d in exam_disc_list}
+            mid_full = sorted(list(block_set))
+            group_title = "Acertos" if view_mode == "geral" else "Notas"
+        else:
+            mid_full = exam_disc_list
+            group_title = "Notas"
+
+        mid_siglas = [get_acronym(m) for m in mid_full]
+
+        base_left = ["Matrícula", "Aluno", "Turma", "Tipo Prova"]
+        base_right = ["Total Acertos"] if view_mode == "geral" else ["Nota Final"]
+        headers_l5 = base_left + mid_siglas + base_right
+        total_cols_cnt = len(headers_l5)
+
+        # Linha 4: Colspan Único em Todo o Topo
+        row4_cells = [""] * total_cols_cnt
+        ws.append(row4_cells)
+        ws.append(headers_l5)
+
+        # Mesclar linha 4 por toda a extensão
+        ws.merge_cells(start_row=4, start_column=1, end_row=4, end_column=total_cols_cnt)
+        cell_grp = ws.cell(row=4, column=1)
+        cell_grp.value = group_title.upper()
+        cell_grp.fill = header_group_fill
+        cell_grp.font = header_font
+        cell_grp.alignment = center_align
+
+        # Estilizar linha 5 (rótulos)
+        for col_idx in range(1, total_cols_cnt + 1):
+            c = ws.cell(row=5, column=col_idx)
+            c.fill = header_fill
+            c.font = header_font
+            c.alignment = center_align
+
         for r in results:
             det = r.get("detalhes_disciplinas", {})
-            for d in det.keys():
-                if d.strip().lower() != "geral":
-                    disciplinas_set.add(d)
-        disciplinas_list = sorted(list(disciplinas_set))
-
-        headers = ["Matrícula", "Aluno", "Turma", "Tipo Prova", "Total Acertos", "Total Questões", "% Acertos"]
-        for d in disciplinas_list:
-            headers.append(d)
-        headers.append("Nota Final")
-
-        ws.append(headers)
-        header_row_idx = 4
-        for col_idx in range(1, len(headers) + 1):
-            cell = ws.cell(row=header_row_idx, column=col_idx)
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = center_align
-
-        for r in results:
-            det = r.get("detalhes_disciplinas", {})
+            aluno_nome = str(r.get("aluno_nome", "")).replace("\n", " ").replace("\r", "")
             row_data = [
                 r.get("aluno_matricula", ""),
-                r.get("aluno_nome", ""),
+                aluno_nome,
                 r.get("aluno_turma", ""),
                 r.get("tipo_prova", ""),
-                r.get("total_acertos", 0),
-                r.get("total_questoes", 0),
-                r.get("percentual_acertos", 0.0) / 100.0,
             ]
 
-            for d in disciplinas_list:
-                d_info = det.get(d, {})
-                tot = d_info.get("total", 0)
-                ac = d_info.get("acertos", 0)
-                n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                row_data.append(round(n_disc, 2))
+            if view_mode == "geral":
+                for b_name in mid_full:
+                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                    row_data.append(b_ac)
+                row_data.append(r.get("total_acertos", 0))
 
-            row_data.append(r.get("nota_final", 0.0))
+            elif view_mode == "bloco":
+                for b_name in mid_full:
+                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                    b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                    b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
+                    row_data.append(round(b_nota, 2))
+                row_data.append(r.get("nota_final", 0.0))
+
+            else: # view_mode == "disciplina"
+                for d_name in mid_full:
+                    d_info = det.get(d_name)
+                    if not d_info:
+                        for k, v in det.items():
+                            if k.strip().lower() == d_name.strip().lower():
+                                d_info = v
+                                break
+                    if not d_info:
+                        d_info = {}
+                    tot = d_info.get("total", 0)
+                    ac = d_info.get("acertos", 0)
+                    n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                    row_data.append(round(n_disc, 2))
+                row_data.append(r.get("nota_final", 0.0))
 
             ws.append(row_data)
             current_row = ws.max_row
@@ -521,13 +684,11 @@ class ReportExporter:
             for col_idx in range(1, len(row_data) + 1):
                 c = ws.cell(row=current_row, column=col_idx)
                 c.border = thin_border
-                if col_idx == 7:  # % Acertos
-                    c.number_format = "0.0%"
+                if col_idx >= 5:
+                    if view_mode != "geral" or col_idx != len(row_data):
+                        c.number_format = "0.00"
                     c.alignment = center_align
-                elif col_idx >= 8:  # Notas de disciplinas e final
-                    c.number_format = "0.00"
-                    c.alignment = center_align
-                elif col_idx in [1, 3, 4, 5, 6]:
+                elif col_idx in [1, 3, 4]:
                     c.alignment = center_align
                 else:
                     c.alignment = left_align
@@ -539,12 +700,27 @@ class ReportExporter:
 
         wb.save(output_path)
 
-    # --- EXPORTAR PARA WORD ---
-    def export_exam_word(self, exam: Dict[str, Any], results: List[Dict[str, Any]], output_path: str, turma_subtitle: str = "Geral - Todas as Turmas"):
+    # --- EXPORTAR PARA WORD (DISCIPLINA EM LANDSCAPE / OUTROS EM PORTRAIT) ---
+    def export_exam_word(
+        self, 
+        exam: Dict[str, Any], 
+        results: List[Dict[str, Any]], 
+        output_path: str, 
+        turma_subtitle: str = "Geral - Todas as Turmas",
+        view_mode: str = "geral"
+    ):
         doc = docx.Document()
-        
+        section = doc.sections[0]
+        if view_mode == "disciplina":
+            section.orientation = WD_ORIENT.LANDSCAPE
+            new_w, new_h = section.page_height, section.page_width
+            section.page_width = new_w
+            section.page_height = new_h
+        else:
+            section.orientation = WD_ORIENT.PORTRAIT
+
         h1 = doc.add_heading(level=1)
-        run = h1.add_run(f"Relatório de Prova: {exam.get('nome', '')}")
+        run = h1.add_run(f"Relatório de Prova: {exam.get('nome', '')} (Modo: {view_mode.upper()})")
         run.font.color.rgb = RGBColor(0x24, 0x2D, 0x64)
 
         p = doc.add_paragraph()
@@ -552,20 +728,34 @@ class ReportExporter:
         p.add_run(f"Data: {exam.get('data', '')} | Bloco(s): {exam.get('bloco_nome') or 'Geral'} | Valor Total Prova: {exam.get('valor_total', 10.0)} pts\n")
         p.add_run(f"Total de Alunos Processados: {len(results)}")
 
-        doc.add_paragraph().paragraph_format.space_after = Pt(12)
+        doc.add_paragraph().paragraph_format.space_after = Pt(10)
 
-        disciplinas_set = set()
-        for r in results:
-            det = r.get("detalhes_disciplinas", {})
-            for d in det.keys():
-                if d.strip().lower() != "geral":
-                    disciplinas_set.add(d)
-        disciplinas_list = sorted(list(disciplinas_set))
+        disc_db_map, exam_blocks = self._get_block_mapping(exam)
+        mapped_subjects = exam.get("layout_config", {}).get("subjects", [])
+        exam_disc_list = []
+        for s in mapped_subjects:
+            n = s.get("nome", "").strip()
+            if n and n.lower() != "geral" and n not in exam_disc_list:
+                exam_disc_list.append(n)
 
-        headers = ["Matrícula", "Aluno", "Turma", "Tipo", "Acertos", "% Acertos"]
-        for d in disciplinas_list:
-            headers.append(d)
-        headers.append("Nota Final")
+        if not exam_disc_list:
+            disc_set = set()
+            for r in results:
+                det = r.get("detalhes_disciplinas", {})
+                for d in det.keys():
+                    if d.strip().lower() != "geral":
+                        disc_set.add(d.strip())
+            exam_disc_list = sorted(list(disc_set))
+
+        if view_mode in ["geral", "bloco"]:
+            block_set = set(exam_blocks) if exam_blocks else {disc_db_map.get(d.lower()) or "Geral" for d in exam_disc_list}
+            mid_full = sorted(list(block_set))
+        else:
+            mid_full = exam_disc_list
+
+        mid_siglas = [get_acronym(m) for m in mid_full]
+
+        headers = ["Matrícula", "Aluno", "Turma", "Tipo"] + mid_siglas + (["Total Acertos"] if view_mode == "geral" else ["Nota Final"])
 
         table = doc.add_table(rows=1, cols=len(headers))
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -579,24 +769,45 @@ class ReportExporter:
 
         for r in results:
             det = r.get("detalhes_disciplinas", {})
+            aluno_nome = str(r.get("aluno_nome", "")).replace("\n", " ").replace("\r", "")
             row_cells = table.add_row().cells
             row_cells[0].text = str(r.get("aluno_matricula", ""))
-            row_cells[1].text = str(r.get("aluno_nome", ""))
+            row_cells[1].text = aluno_nome
             row_cells[2].text = str(r.get("aluno_turma", ""))
             row_cells[3].text = str(r.get("tipo_prova", ""))
-            row_cells[4].text = f"{r.get('total_acertos', 0)}/{r.get('total_questoes', 0)}"
-            row_cells[5].text = f"{r.get('percentual_acertos', 0.0):.1f}%"
 
-            col_idx = 6
-            for d in disciplinas_list:
-                d_info = det.get(d, {})
-                tot = d_info.get("total", 0)
-                ac = d_info.get("acertos", 0)
-                n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                row_cells[col_idx].text = f"{n_disc:.2f}"
-                col_idx += 1
+            col_idx = 4
+            if view_mode == "geral":
+                for b_name in mid_full:
+                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                    row_cells[col_idx].text = str(b_ac)
+                    col_idx += 1
+                row_cells[col_idx].text = f"{r.get('total_acertos', 0)}/{r.get('total_questoes', 0)}"
 
-            row_cells[col_idx].text = f"{r.get('nota_final', 0.0):.2f}"
+            elif view_mode == "bloco":
+                for b_name in mid_full:
+                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                    b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                    b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
+                    row_cells[col_idx].text = f"{b_nota:.2f}"
+                    col_idx += 1
+                row_cells[col_idx].text = f"{r.get('nota_final', 0.0):.2f}"
+
+            else: # view_mode == "disciplina"
+                for d_name in mid_full:
+                    d_info = det.get(d_name)
+                    if not d_info:
+                        for k, v in det.items():
+                            if k.strip().lower() == d_name.strip().lower():
+                                d_info = v
+                                break
+                    if not d_info:
+                        d_info = {}
+                    tot = d_info.get("total", 0)
+                    ac = d_info.get("acertos", 0)
+                    n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                    row_cells[col_idx].text = f"{n_disc:.2f}"
+                    col_idx += 1
+                row_cells[col_idx].text = f"{r.get('nota_final', 0.0):.2f}"
 
         doc.save(output_path)
-

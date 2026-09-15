@@ -1,9 +1,10 @@
+import os
 import qtawesome as qta
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel, QPushButton
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QPixmap
 
 from ui.tabs.students_tab import StudentsTab
 from ui.tabs.subjects_blocks_tab import SubjectsBlocksTab
@@ -18,6 +19,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Corretor de Provas - Sistema de Leitura e Correção Automatizada")
         self.resize(1200, 780)
+        if os.path.exists("logo.png"):
+            self.setWindowIcon(QIcon("logo.png"))
         self.init_ui()
 
     def init_ui(self):
@@ -32,7 +35,11 @@ class MainWindow(QMainWindow):
         header_bar = QHBoxLayout()
         
         logo_icon = QLabel()
-        logo_icon.setPixmap(qta.icon('fa5s.graduation-cap', color='#242D64').pixmap(32, 32))
+        if os.path.exists("logo.png"):
+            pixmap = QPixmap("logo.png").scaled(38, 38, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            logo_icon.setPixmap(pixmap)
+        else:
+            logo_icon.setPixmap(qta.icon('fa5s.graduation-cap', color='#242D64').pixmap(32, 32))
 
         logo_lbl = QLabel("<b>CORRETOR DE PROVAS</b>")
         logo_lbl.setStyleSheet("font-size: 20px; color: #242D64; font-weight: bold;")

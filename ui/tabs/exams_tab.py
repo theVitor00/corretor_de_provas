@@ -584,6 +584,8 @@ class ExamFormDialog(QDialog):
             QMessageBox.critical(self, "Erro ao Salvar Prova", str(e))
 
 
+from services.abbreviations import get_acronym
+
 class ExamsTab(QWidget):
     def __init__(self, on_process_request=None, on_view_results_request=None, parent=None):
         super().__init__(parent)
@@ -638,7 +640,16 @@ class ExamsTab(QWidget):
             self.table.setItem(row_idx, 0, QTableWidgetItem(str(e["id"])))
             self.table.setItem(row_idx, 1, QTableWidgetItem(str(e["data"])))
             self.table.setItem(row_idx, 2, QTableWidgetItem(str(e["nome"])))
-            self.table.setItem(row_idx, 3, QTableWidgetItem(str(e.get("bloco_nome") or "-")))
+            full_b_name = str(e.get("bloco_nome") or "-")
+            if full_b_name and full_b_name != "-":
+                b_parts = [p.strip() for p in full_b_name.split(",") if p.strip()]
+                siglas_str = ", ".join(get_acronym(p) for p in b_parts)
+            else:
+                siglas_str = "-"
+
+            item_bloco = QTableWidgetItem(siglas_str)
+            item_bloco.setToolTip(f"Bloco(s): {full_b_name}")
+            self.table.setItem(row_idx, 3, item_bloco)
             
             tipos_str = ", ".join(e.get("gabaritos", {}).keys())
             self.table.setItem(row_idx, 4, QTableWidgetItem(tipos_str))
