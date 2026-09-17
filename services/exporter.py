@@ -2,7 +2,7 @@ import os
 from typing import List, Dict, Any, Optional, Tuple
 from database import Database, db as default_db
 from models.subject import SubjectBlockModel
-from services.abbreviations import get_acronym
+from services.abbreviations import get_acronym, get_legend_mapping, is_subject_applicable_to_tipo
 
 # ReportLab imports for PDF
 from reportlab.lib.pagesizes import letter, A4, landscape
@@ -117,6 +117,7 @@ class ReportExporter:
         view_mode: str = "geral"
     ):
         logo_path, watermark = self._get_branding()
+        possui_redacao = bool(exam.get("possui_redacao", False))
         
         is_landscape = (view_mode == "disciplina")
         pagesize = landscape(A4) if is_landscape else A4
@@ -191,13 +192,21 @@ class ReportExporter:
             alignment=0
         )
 
+        legend_style = ParagraphStyle(
+            "LegendStyle",
+            parent=styles["Normal"],
+            fontName="Helvetica",
+            fontSize=7.5,
+            leading=10,
+            textColor=colors.HexColor("#475569")
+        )
+
         story = []
 
         # Título e Subtítulo por Turma
         mode_label = view_mode.upper()
         story.append(Paragraph(f"Relatório de Resultados - {exam.get('nome', 'Prova')} (Modo: {mode_label})", title_style))
         story.append(Paragraph(f"<b>Turma:</b> {turma_subtitle} | Data: {exam.get('data', 'N/A')} | Bloco(s): {exam.get('bloco_nome') or 'Geral'} | Valor Total: {exam.get('valor_total', 10.0)} pts | Alunos Processados: {len(results)}", subtitle_style))
-        story.append(Spacer(1, 10))
 
         disc_db_map, exam_blocks = self._get_block_mapping(exam)
         mapped_subjects = exam.get("layout_config", {}).get("subjects", [])
@@ -224,14 +233,34 @@ class ReportExporter:
             mid_full = exam_disc_list
             group_title = "Notas"
 
+        # Legenda antes da tabela
+        leg_map = get_legend_mapping(mid_full)
+        if leg_map:
+            leg_items = [f"<b>{k}</b>: {v}" for k, v in leg_map.items()]
+            leg_str = "  |  ".join(leg_items)
+            story.append(Spacer(1, 4))
+            story.append(Paragraph(f"<b>Legenda:</b> {leg_str}", legend_style))
+
+        story.append(Spacer(1, 10))
+
         mid_siglas = [get_acronym(m) for m in mid_full]
         num_mid = len(mid_siglas)
 
-        # Construir Tabela com Cabeçalho de 2 Linhas
-        total_cols = 4 + num_mid + 1
+        # Montar colunas finais do cabeçalho
+        right_headers = []
+        if view_mode == "geral":
+            right_headers.append("Total")
+        if possui_redacao:
+            red_title = "RED" if view_mode == "disciplina" else "Redação"
+            right_headers.append(red_title)
+        if possui_redacao or view_mode != "geral":
+            right_headers.append("Nota Final")
+
+        total_cols = 5 + num_mid + len(right_headers)
         row1 = [Paragraph(f"<b>{group_title}</b>", table_header_top_style)] + [Paragraph("", table_header_style) for _ in range(total_cols - 1)]
 
         row2 = [
+            Paragraph("", table_header_style),
             Paragraph("Matrícula", table_header_style),
             Paragraph("Aluno", table_header_style),
             Paragraph("Turma", table_header_style),
@@ -240,17 +269,16 @@ class ReportExporter:
         for sig in mid_siglas:
             row2.append(Paragraph(sig, table_header_style))
 
-        if view_mode == "geral":
-            row2.append(Paragraph("Total", table_header_style))
-        else:
-            row2.append(Paragraph("Nota Final", table_header_style))
+        for rh in right_headers:
+            row2.append(Paragraph(rh, table_header_style))
 
         table_data = [row1, row2]
 
-        for r in results:
+        for row_idx, r in enumerate(results, 1):
             det = r.get("detalhes_disciplinas", {})
             aluno_nome = str(r.get("aluno_nome", "Aluno Não Cadastrado")).replace("\n", " ").replace("\r", "")
             row = [
+                Paragraph(str(row_idx), table_cell_style),
                 Paragraph(str(r.get("aluno_matricula", "")), table_cell_style),
                 Paragraph(f"<nobr>{aluno_nome}</nobr>", table_cell_student_style),
                 Paragraph(str(r.get("aluno_turma", "N/A")), table_cell_style),
@@ -269,23 +297,34 @@ class ReportExporter:
                     b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
                     b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
                     row.append(Paragraph(f"{b_nota:.2f}", table_cell_style))
-                row.append(Paragraph(f"<b>{r.get('nota_final', 0.0):.2f}</b>", table_cell_style))
 
             else: # view_mode == "disciplina"
                 for d_name in mid_full:
-                    d_info = det.get(d_name)
-                    if not d_info:
-                        for k, v in det.items():
-                            if k.strip().lower() == d_name.strip().lower():
-                                d_info = v
-                                break
-                    if not d_info:
-                        d_info = {}
-                    tot = d_info.get("total", 0)
-                    ac = d_info.get("acertos", 0)
-                    n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                    row.append(Paragraph(f"{n_disc:.2f}", table_cell_style))
-                row.append(Paragraph(f"<b>{r.get('nota_final', 0.0):.2f}</b>", table_cell_style))
+                    if not is_subject_applicable_to_tipo(d_name, r.get("tipo_prova", "")):
+                        row.append(Paragraph("-", table_cell_style))
+                    else:
+                        d_info = det.get(d_name)
+                        if not d_info:
+                            for k, v in det.items():
+                                if k.strip().lower() == d_name.strip().lower():
+                                    d_info = v
+                                    break
+                        if not d_info:
+                            d_info = {}
+                        tot = d_info.get("total", 0)
+                        ac = d_info.get("acertos", 0)
+                        n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                        row.append(Paragraph(f"{n_disc:.2f}", table_cell_style))
+
+            if possui_redacao:
+                n_red = r.get("nota_redacao")
+                n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
+                row.append(Paragraph(n_red_str, table_cell_style))
+
+            if possui_redacao or view_mode != "geral":
+                n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
+                fn_val = float(r.get("total_acertos", 0)) + n_red_val
+                row.append(Paragraph(f"<b>{fn_val:.2f}</b>", table_cell_style))
 
             table_data.append(row)
 
@@ -295,13 +334,14 @@ class ReportExporter:
         max_name_w = 7.5 * cm if is_landscape else 5.5 * cm
         aluno_col_w = max(3.2 * cm, min(max_name_w, (max_name_len * 0.16 + 0.6) * cm))
 
-        fixed_w = 1.8 * cm + aluno_col_w + 1.6 * cm + 1.2 * cm + 2.0 * cm
+        right_cols_cnt = len(right_headers)
+        fixed_w = 0.8 * cm + 1.8 * cm + aluno_col_w + 1.6 * cm + 1.2 * cm + (1.6 * cm * right_cols_cnt)
         avail_space = total_page_w - fixed_w
         mid_width = (avail_space / num_mid) if num_mid > 0 else 1.2 * cm
         if mid_width < 1.0 * cm:
             mid_width = 1.0 * cm
 
-        col_widths = [1.8 * cm, aluno_col_w, 1.6 * cm, 1.2 * cm] + [mid_width] * num_mid + [2.0 * cm]
+        col_widths = [0.8 * cm, 1.8 * cm, aluno_col_w, 1.6 * cm, 1.2 * cm] + [mid_width] * num_mid + [1.6 * cm] * right_cols_cnt
 
         t_style = [
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1E293B")),
@@ -568,6 +608,8 @@ class ReportExporter:
         else:
             ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
 
+        possui_redacao = bool(exam.get("possui_redacao", False))
+
         header_fill = PatternFill(start_color="242D64", end_color="242D64", fill_type="solid")
         header_group_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
         header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
@@ -584,7 +626,6 @@ class ReportExporter:
         ws.cell(row=1, column=1).font = title_font
         ws.append([f"Turma: {turma_subtitle} | Data: {exam.get('data', '')} | Bloco(s): {exam.get('bloco_nome', 'Geral')} | Total Alunos Processados: {len(results)} | Valor Total Prova: {exam.get('valor_total', 10.0)}"])
         ws.cell(row=2, column=1).font = subtitle_font
-        ws.append([])
 
         disc_db_map, exam_blocks = self._get_block_mapping(exam)
         mapped_subjects = exam.get("layout_config", {}).get("subjects", [])
@@ -613,35 +654,55 @@ class ReportExporter:
 
         mid_siglas = [get_acronym(m) for m in mid_full]
 
-        base_left = ["Matrícula", "Aluno", "Turma", "Tipo Prova"]
-        base_right = ["Total Acertos"] if view_mode == "geral" else ["Nota Final"]
+        base_left = ["", "Matrícula", "Aluno", "Turma", "Tipo Prova"]
+        base_right = []
+        if view_mode == "geral":
+            base_right.append("Total Acertos")
+        if possui_redacao:
+            red_title = "RED" if view_mode == "disciplina" else "Redação"
+            base_right.append(red_title)
+        if possui_redacao or view_mode != "geral":
+            base_right.append("Nota Final")
+
         headers_l5 = base_left + mid_siglas + base_right
         total_cols_cnt = len(headers_l5)
 
-        # Linha 4: Colspan Único em Todo o Topo
-        row4_cells = [""] * total_cols_cnt
-        ws.append(row4_cells)
+        # Legenda antes da tabela mesclada na largura da tabela
+        leg_map = get_legend_mapping(mid_full)
+        if leg_map:
+            leg_items = [f"{sig} = {full_name}" for sig, full_name in leg_map.items()]
+            ws.append([f"Legenda: {' | '.join(leg_items)}"])
+            r_leg = ws.max_row
+            ws.merge_cells(start_row=r_leg, start_column=1, end_row=r_leg, end_column=total_cols_cnt)
+            cell_leg = ws.cell(row=r_leg, column=1)
+            cell_leg.font = Font(name="Calibri", size=9, bold=True, color="242D64")
+            cell_leg.alignment = Alignment(horizontal="left", vertical="center")
+
+        ws.append([])
+
+        row_grp = ws.max_row + 1
+        ws.append([""] * total_cols_cnt)
+        row_hdr = ws.max_row + 1
         ws.append(headers_l5)
 
-        # Mesclar linha 4 por toda a extensão
-        ws.merge_cells(start_row=4, start_column=1, end_row=4, end_column=total_cols_cnt)
-        cell_grp = ws.cell(row=4, column=1)
+        ws.merge_cells(start_row=row_grp, start_column=1, end_row=row_grp, end_column=total_cols_cnt)
+        cell_grp = ws.cell(row=row_grp, column=1)
         cell_grp.value = group_title.upper()
         cell_grp.fill = header_group_fill
         cell_grp.font = header_font
         cell_grp.alignment = center_align
 
-        # Estilizar linha 5 (rótulos)
         for col_idx in range(1, total_cols_cnt + 1):
-            c = ws.cell(row=5, column=col_idx)
+            c = ws.cell(row=row_hdr, column=col_idx)
             c.fill = header_fill
             c.font = header_font
             c.alignment = center_align
 
-        for r in results:
+        for row_idx, r in enumerate(results, 1):
             det = r.get("detalhes_disciplinas", {})
             aluno_nome = str(r.get("aluno_nome", "")).replace("\n", " ").replace("\r", "")
             row_data = [
+                row_idx,
                 r.get("aluno_matricula", ""),
                 aluno_nome,
                 r.get("aluno_turma", ""),
@@ -660,23 +721,33 @@ class ReportExporter:
                     b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
                     b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
                     row_data.append(round(b_nota, 2))
-                row_data.append(r.get("nota_final", 0.0))
 
             else: # view_mode == "disciplina"
                 for d_name in mid_full:
-                    d_info = det.get(d_name)
-                    if not d_info:
-                        for k, v in det.items():
-                            if k.strip().lower() == d_name.strip().lower():
-                                d_info = v
-                                break
-                    if not d_info:
-                        d_info = {}
-                    tot = d_info.get("total", 0)
-                    ac = d_info.get("acertos", 0)
-                    n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                    row_data.append(round(n_disc, 2))
-                row_data.append(r.get("nota_final", 0.0))
+                    if not is_subject_applicable_to_tipo(d_name, r.get("tipo_prova", "")):
+                        row_data.append("-")
+                    else:
+                        d_info = det.get(d_name)
+                        if not d_info:
+                            for k, v in det.items():
+                                if k.strip().lower() == d_name.strip().lower():
+                                    d_info = v
+                                    break
+                        if not d_info:
+                            d_info = {}
+                        tot = d_info.get("total", 0)
+                        ac = d_info.get("acertos", 0)
+                        n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                        row_data.append(round(n_disc, 2))
+
+            if possui_redacao:
+                n_red = r.get("nota_redacao")
+                row_data.append(round(n_red, 2) if n_red is not None else 0.0)
+
+            if possui_redacao or view_mode != "geral":
+                n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
+                fn_val = float(r.get("total_acertos", 0)) + n_red_val
+                row_data.append(round(fn_val, 2))
 
             ws.append(row_data)
             current_row = ws.max_row
@@ -684,11 +755,11 @@ class ReportExporter:
             for col_idx in range(1, len(row_data) + 1):
                 c = ws.cell(row=current_row, column=col_idx)
                 c.border = thin_border
-                if col_idx >= 5:
+                if col_idx >= 6:
                     if view_mode != "geral" or col_idx != len(row_data):
                         c.number_format = "0.00"
                     c.alignment = center_align
-                elif col_idx in [1, 3, 4]:
+                elif col_idx in [1, 2, 4, 5]:
                     c.alignment = center_align
                 else:
                     c.alignment = left_align
@@ -719,6 +790,8 @@ class ReportExporter:
         else:
             section.orientation = WD_ORIENT.PORTRAIT
 
+        possui_redacao = bool(exam.get("possui_redacao", False))
+
         h1 = doc.add_heading(level=1)
         run = h1.add_run(f"Relatório de Prova: {exam.get('nome', '')} (Modo: {view_mode.upper()})")
         run.font.color.rgb = RGBColor(0x24, 0x2D, 0x64)
@@ -727,8 +800,6 @@ class ReportExporter:
         p.add_run(f"Turma: {turma_subtitle}\n")
         p.add_run(f"Data: {exam.get('data', '')} | Bloco(s): {exam.get('bloco_nome') or 'Geral'} | Valor Total Prova: {exam.get('valor_total', 10.0)} pts\n")
         p.add_run(f"Total de Alunos Processados: {len(results)}")
-
-        doc.add_paragraph().paragraph_format.space_after = Pt(10)
 
         disc_db_map, exam_blocks = self._get_block_mapping(exam)
         mapped_subjects = exam.get("layout_config", {}).get("subjects", [])
@@ -753,9 +824,29 @@ class ReportExporter:
         else:
             mid_full = exam_disc_list
 
+        leg_map = get_legend_mapping(mid_full)
+        if leg_map:
+            p_leg = doc.add_paragraph()
+            r_head = p_leg.add_run("Legenda: ")
+            r_head.bold = True
+            r_head.font.color.rgb = RGBColor(0x24, 0x2D, 0x64)
+            leg_str = " | ".join([f"{sig} = {full_name}" for sig, full_name in leg_map.items()])
+            p_leg.add_run(leg_str)
+
+        doc.add_paragraph().paragraph_format.space_after = Pt(10)
+
         mid_siglas = [get_acronym(m) for m in mid_full]
 
-        headers = ["Matrícula", "Aluno", "Turma", "Tipo"] + mid_siglas + (["Total Acertos"] if view_mode == "geral" else ["Nota Final"])
+        right_headers = []
+        if view_mode == "geral":
+            right_headers.append("Total Acertos")
+        if possui_redacao:
+            red_title = "RED" if view_mode == "disciplina" else "Redação"
+            right_headers.append(red_title)
+        if possui_redacao or view_mode != "geral":
+            right_headers.append("Nota Final")
+
+        headers = ["", "Matrícula", "Aluno", "Turma", "Tipo"] + mid_siglas + right_headers
 
         table = doc.add_table(rows=1, cols=len(headers))
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -767,22 +858,24 @@ class ReportExporter:
             hdr_cells[i].paragraphs[0].runs[0].font.bold = True
             hdr_cells[i].paragraphs[0].runs[0].font.color.rgb = RGBColor(0x24, 0x2D, 0x64)
 
-        for r in results:
+        for row_idx, r in enumerate(results, 1):
             det = r.get("detalhes_disciplinas", {})
             aluno_nome = str(r.get("aluno_nome", "")).replace("\n", " ").replace("\r", "")
             row_cells = table.add_row().cells
-            row_cells[0].text = str(r.get("aluno_matricula", ""))
-            row_cells[1].text = aluno_nome
-            row_cells[2].text = str(r.get("aluno_turma", ""))
-            row_cells[3].text = str(r.get("tipo_prova", ""))
+            row_cells[0].text = str(row_idx)
+            row_cells[1].text = str(r.get("aluno_matricula", ""))
+            row_cells[2].text = aluno_nome
+            row_cells[3].text = str(r.get("aluno_turma", ""))
+            row_cells[4].text = str(r.get("tipo_prova", ""))
 
-            col_idx = 4
+            col_idx = 5
             if view_mode == "geral":
                 for b_name in mid_full:
                     b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
                     row_cells[col_idx].text = str(b_ac)
                     col_idx += 1
                 row_cells[col_idx].text = f"{r.get('total_acertos', 0)}/{r.get('total_questoes', 0)}"
+                col_idx += 1
 
             elif view_mode == "bloco":
                 for b_name in mid_full:
@@ -791,23 +884,35 @@ class ReportExporter:
                     b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
                     row_cells[col_idx].text = f"{b_nota:.2f}"
                     col_idx += 1
-                row_cells[col_idx].text = f"{r.get('nota_final', 0.0):.2f}"
 
             else: # view_mode == "disciplina"
                 for d_name in mid_full:
-                    d_info = det.get(d_name)
-                    if not d_info:
-                        for k, v in det.items():
-                            if k.strip().lower() == d_name.strip().lower():
-                                d_info = v
-                                break
-                    if not d_info:
-                        d_info = {}
-                    tot = d_info.get("total", 0)
-                    ac = d_info.get("acertos", 0)
-                    n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                    row_cells[col_idx].text = f"{n_disc:.2f}"
+                    if not is_subject_applicable_to_tipo(d_name, r.get("tipo_prova", "")):
+                        row_cells[col_idx].text = "-"
+                    else:
+                        d_info = det.get(d_name)
+                        if not d_info:
+                            for k, v in det.items():
+                                if k.strip().lower() == d_name.strip().lower():
+                                    d_info = v
+                                    break
+                        if not d_info:
+                            d_info = {}
+                        tot = d_info.get("total", 0)
+                        ac = d_info.get("acertos", 0)
+                        n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                        row_cells[col_idx].text = f"{n_disc:.2f}"
                     col_idx += 1
-                row_cells[col_idx].text = f"{r.get('nota_final', 0.0):.2f}"
+
+            if possui_redacao:
+                n_red = r.get("nota_redacao")
+                n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
+                row_cells[col_idx].text = n_red_str
+                col_idx += 1
+
+            if possui_redacao or view_mode != "geral":
+                n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
+                fn_val = float(r.get("total_acertos", 0)) + n_red_val
+                row_cells[col_idx].text = f"{fn_val:.2f}"
 
         doc.save(output_path)

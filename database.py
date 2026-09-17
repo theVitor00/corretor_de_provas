@@ -72,6 +72,7 @@ class Database:
                     data TEXT NOT NULL,
                     bloco_id INTEGER NULL,
                     valor_total REAL DEFAULT 10.0,
+                    possui_redacao INTEGER DEFAULT 0,
                     layout_config TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (bloco_id) REFERENCES blocos(id) ON DELETE SET NULL
@@ -113,6 +114,7 @@ class Database:
                     respostas_aluno TEXT NOT NULL,
                     status_controle TEXT DEFAULT 'OK',
                     nota_final REAL DEFAULT 0.0,
+                    nota_redacao REAL DEFAULT NULL,
                     percentual_acertos REAL DEFAULT 0.0,
                     total_acertos INTEGER DEFAULT 0,
                     total_questoes INTEGER DEFAULT 0,
@@ -133,7 +135,27 @@ class Database:
 
             conn.commit()
 
+        self.migrate_schema()
         self.migrate_matriculas()
+        self.migrate_turmas()
+
+    def migrate_schema(self):
+        """
+        Migração automática de schema para bancos de dados existentes.
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("PRAGMA table_info(provas);")
+            cols_provas = [row["name"] for row in cur.fetchall()]
+            if "possui_redacao" not in cols_provas:
+                cur.execute("ALTER TABLE provas ADD COLUMN possui_redacao INTEGER DEFAULT 0;")
+
+            cur.execute("PRAGMA table_info(prova_processamentos);")
+            cols_proc = [row["name"] for row in cur.fetchall()]
+            if "nota_redacao" not in cols_proc:
+                cur.execute("ALTER TABLE prova_processamentos ADD COLUMN nota_redacao REAL DEFAULT NULL;")
+
+            conn.commit()
 
     def migrate_matriculas(self):
         """
@@ -160,6 +182,30 @@ class Database:
                 cleaned = clean_matricula(orig)
                 if cleaned != orig:
                     cur.execute("UPDATE prova_processamentos SET aluno_matricula = ? WHERE id = ?", (cleaned, row["id"]))
+
+            conn.commit()
+
+    def migrate_turmas(self):
+        """
+        Migração automática: converte valores da coluna 'turma' na tabela de alunos
+        (ex: '1ª SÉRIE - A' -> '1ª Série', '2ª SÉRIE - A' -> '2ª Série', '3ª SÉRIE - A' -> '3ª Série').
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT DISTINCT turma FROM alunos")
+            turmas = [row["turma"] for row in cur.fetchall() if row["turma"]]
+            for t in turmas:
+                new_t = t
+                t_upper = t.upper()
+                if "1" in t and ("SÉRIE" in t_upper or "SERIE" in t_upper):
+                    new_t = "1ª Série"
+                elif "2" in t and ("SÉRIE" in t_upper or "SERIE" in t_upper):
+                    new_t = "2ª Série"
+                elif "3" in t and ("SÉRIE" in t_upper or "SERIE" in t_upper):
+                    new_t = "3ª Série"
+
+                if new_t != t:
+                    cur.execute("UPDATE alunos SET turma = ? WHERE turma = ?", (new_t, t))
 
             conn.commit()
 

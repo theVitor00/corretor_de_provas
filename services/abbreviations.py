@@ -96,3 +96,41 @@ def get_header_tooltip(full_name: str, mode: str = "geral") -> str:
         desc = "Nota da disciplina calculada proporcionalmente na escala de 0,00 a 10,00"
     
     return f"{sigla} → {full_name}\n({desc})"
+
+
+def get_legend_mapping(full_names: list, possesses_redacao: bool = False) -> dict:
+    """
+    Retorna um dicionário {sigla: nome_completo} com as legendas explicativas para os relatórios.
+    """
+    legend = {}
+    for name in full_names:
+        sig = get_acronym(name)
+        if sig and sig not in legend:
+            legend[sig] = name
+    return legend
+
+
+def is_subject_applicable_to_tipo(subject_name: str, student_tipo: str, subject_tipo: str = None) -> bool:
+    """
+    Verifica se a disciplina se aplica ao tipo de prova do aluno.
+    Por exemplo:
+    - Se o tipo for 1, a disciplina de Inglês se aplica e a de Espanhol não.
+    - Se o tipo for 2, a disciplina de Espanhol se aplica e a de Inglês não.
+    """
+    if not student_tipo or not subject_name:
+        return True
+
+    st_clean = str(student_tipo).strip().lower()
+
+    if subject_tipo is not None and str(subject_tipo).strip() != "":
+        return str(subject_tipo).strip().lower() == st_clean
+
+    s_name_lower = str(subject_name).strip().lower()
+    if "ingl" in s_name_lower:
+        return "1" in st_clean or "ing" in st_clean or st_clean == ""
+    if "espanh" in s_name_lower:
+        return "2" in st_clean or "esp" in st_clean
+
+    return True
+
+

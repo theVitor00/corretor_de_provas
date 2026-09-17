@@ -5,8 +5,8 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QGroupBox,
     QMessageBox, QFileDialog, QDialog
 )
-from PyQt6.QtCore import Qt, QRect
-from PyQt6.QtGui import QPainter, QColor, QFont, QTextDocument, QPageLayout
+from PyQt6.QtCore import Qt, QRect, QMarginsF, QUrl
+from PyQt6.QtGui import QPainter, QColor, QFont, QTextDocument, QPageLayout, QImage
 from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
 
 from models.exam import ExamModel
@@ -14,7 +14,7 @@ from models.student import StudentModel
 from models.processing import ProcessingModel
 from models.subject import SubjectBlockModel
 from services.exporter import ReportExporter
-from services.abbreviations import get_acronym, get_header_tooltip
+from services.abbreviations import get_acronym, get_header_tooltip, get_legend_mapping, is_subject_applicable_to_tipo
 from ui.tabs.students_tab import StudentDetailDialog
 
 
@@ -188,6 +188,18 @@ class ReportsTab(QWidget):
 
         layout.addLayout(h_exports)
 
+        # Painel de Legenda (entre botões e tabela)
+        self.gb_legend = QGroupBox("Legenda")
+        l_legend = QHBoxLayout(self.gb_legend)
+        l_legend.setContentsMargins(10, 4, 10, 6)
+        self.lbl_legend = QLabel()
+        self.lbl_legend.setWordWrap(True)
+        self.lbl_legend.setStyleSheet("font-size: 11px; color: #334155;")
+        l_legend.addWidget(self.lbl_legend)
+        self.gb_legend.setVisible(False)
+
+        layout.addWidget(self.gb_legend)
+
         # Table Area com Cabeçalho Unificado em Duas Linhas
         self.tbl_results = QTableWidget()
         self.header_view = GroupedHeaderView(Qt.Orientation.Horizontal, self.tbl_results)
@@ -228,7 +240,7 @@ class ReportsTab(QWidget):
     def get_current_turma_subtitle(self) -> str:
         turma_val = self.combo_turma.currentData()
         if not turma_val or turma_val == "Todas":
-            return "Geral - Todas as Turmas"
+            return "Geral - Para Todas as Turmas"
         return str(turma_val)
 
     def _get_block_mapping(self, exam: dict) -> dict:
@@ -246,10 +258,12 @@ class ReportsTab(QWidget):
             self.current_exam = None
             self.current_results = []
             self.tbl_results.setRowCount(0)
+            self.gb_legend.setVisible(False)
             self.update_cards([])
             return
 
         self.current_exam = self.exam_model.get_exam_by_id(exam_id)
+        possui_redacao = bool(self.current_exam.get("possui_redacao", False))
         turma_val = self.combo_turma.currentData()
         sort_val = self.combo_sort.currentData()
         search_val = self.txt_search.text().strip()
@@ -258,6 +272,19 @@ class ReportsTab(QWidget):
         self.current_results = self.processing_model.list_results_for_exam(
             exam_id, turma_filter=turma_val, sort_by=sort_val, search=search_val
         )
+
+        def get_final_score(r):
+            n_red = (r.get("nota_redacao") or 0.0) if possui_redacao else 0.0
+            if view_mode == "geral":
+                return float(r.get("total_acertos", 0)) + float(n_red)
+            else:
+                return float(r.get("nota_final", 0.0)) + float(n_red)
+
+        if sort_val == "nota_desc":
+            self.current_results.sort(key=lambda r: (get_final_score(r), str(r.get("aluno_nome", ""))), reverse=False)
+            self.current_results.sort(key=lambda r: get_final_score(r), reverse=True)
+        elif sort_val == "nota_asc":
+            self.current_results.sort(key=lambda r: (get_final_score(r), str(r.get("aluno_nome", ""))))
 
         self.update_cards(self.current_results)
 
@@ -307,16 +334,32 @@ class ReportsTab(QWidget):
             mid_headers_siglas = [get_acronym(d) for d in mid_headers_full]
             group_title = "Notas"
 
+        # Atualizar painel de Legenda das Siglas
+        leg_map = get_legend_mapping(mid_headers_full, possesses_redacao=possui_redacao)
+        if leg_map:
+            leg_items = [f"<b>{k}</b> = {v}" for k, v in leg_map.items()]
+            self.lbl_legend.setText(" &nbsp;&nbsp;|&nbsp;&nbsp; ".join(leg_items))
+            self.gb_legend.setVisible(True)
+        else:
+            self.gb_legend.setVisible(False)
+
         # 3. Definição estrita da ordem das colunas da tabela GUI
-        base_left = ["Matrícula", "Nome do Aluno", "Turma", "Tipo"]
-        base_right = ["Total", "Ação"] if view_mode == "geral" else ["Nota Final", "Ação"]
+        base_left = ["", "Matrícula", "Nome do Aluno", "Turma", "Tipo"]
+        base_right = []
+        if view_mode == "geral":
+            base_right.append("Total")
+        if possui_redacao:
+            red_label = "RED" if view_mode == "disciplina" else "Redação"
+            base_right.append(red_label)
+        if (possui_redacao or view_mode != "geral") and view_mode != "disciplina":
+            base_right.append("Nota Final")
+        base_right.append("Ação")
 
         all_column_labels = base_left + mid_headers_siglas + base_right
         
-        start_data_col = 4
+        start_data_col = 5
         num_mid = len(mid_headers_full)
-        summary_col_idx = start_data_col + num_mid
-        action_col_idx = summary_col_idx + 1
+        action_col_idx = len(all_column_labels) - 1
 
         self.tbl_results.clear()
         self.tbl_results.setColumnCount(len(all_column_labels))
@@ -336,8 +379,10 @@ class ReportsTab(QWidget):
                 item.setToolTip(tt)
             elif label == "Total":
                 item.setToolTip("Total de questões acertadas na prova inteira")
+            elif label in ["Redação", "RED"]:
+                item.setToolTip("Nota de redação inserida manualmente ou via CSV")
             elif label == "Nota Final":
-                item.setToolTip(f"Nota final do aluno (0,00 a {self.current_exam.get('valor_total', 10.0):.2f})")
+                item.setToolTip("Nota final do aluno (Total + Redação se houver)")
 
         # Configuração de largura das colunas
         font_metrics = self.tbl_results.fontMetrics()
@@ -349,16 +394,16 @@ class ReportsTab(QWidget):
         aluno_col_width = max_name_px + 24
 
         header = self.tbl_results.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # Matrícula
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)     # Nome do Aluno
-        self.tbl_results.setColumnWidth(1, aluno_col_width)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # Turma
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Tipo
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # # (Index)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Matrícula
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)     # Nome do Aluno
+        self.tbl_results.setColumnWidth(2, aluno_col_width)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Turma
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # Tipo
 
-        for c_i in range(start_data_col, start_data_col + num_mid):
+        for c_i in range(start_data_col, action_col_idx):
             header.setSectionResizeMode(c_i, QHeaderView.ResizeMode.ResizeToContents)
 
-        header.setSectionResizeMode(summary_col_idx, QHeaderView.ResizeMode.ResizeToContents) # Total / Nota Final
         header.setSectionResizeMode(action_col_idx, QHeaderView.ResizeMode.Fixed)              # Ação (Boletim)
         self.tbl_results.setColumnWidth(action_col_idx, 160)
 
@@ -367,11 +412,14 @@ class ReportsTab(QWidget):
         for row_idx, r in enumerate(self.current_results):
             det = r.get("detalhes_disciplinas", {})
 
-            # Colunas de identificação (0, 1, 2, 3)
-            self.tbl_results.setItem(row_idx, 0, QTableWidgetItem(str(r["aluno_matricula"])))
-            self.tbl_results.setItem(row_idx, 1, QTableWidgetItem(str(r["aluno_nome"])))
-            self.tbl_results.setItem(row_idx, 2, QTableWidgetItem(str(r["aluno_turma"])))
-            self.tbl_results.setItem(row_idx, 3, QTableWidgetItem(str(r["tipo_prova"])))
+            # Colunas de identificação (0: Numeração, 1: Matrícula, 2: Nome, 3: Turma, 4: Tipo)
+            item_seq = QTableWidgetItem(str(row_idx + 1))
+            item_seq.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tbl_results.setItem(row_idx, 0, item_seq)
+            self.tbl_results.setItem(row_idx, 1, QTableWidgetItem(str(r["aluno_matricula"])))
+            self.tbl_results.setItem(row_idx, 2, QTableWidgetItem(str(r["aluno_nome"])))
+            self.tbl_results.setItem(row_idx, 3, QTableWidgetItem(str(r["aluno_turma"])))
+            self.tbl_results.setItem(row_idx, 4, QTableWidgetItem(str(r["tipo_prova"])))
 
             # Garantir que NENHUM widget residual permaneça nas colunas de dados
             for c_i in range(0, action_col_idx):
@@ -411,31 +459,58 @@ class ReportsTab(QWidget):
                     self.tbl_results.setItem(row_idx, target_col, item)
 
                 else: # view_mode == "disciplina"
-                    d_info = det.get(item_name)
-                    if not d_info:
-                        for k, v in det.items():
-                            if k.strip().lower() == item_name.strip().lower():
-                                d_info = v
-                                break
-                    if not d_info:
-                        d_info = {}
+                    if not is_subject_applicable_to_tipo(item_name, r.get("tipo_prova", "")):
+                        item = QTableWidgetItem("-")
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        self.tbl_results.setItem(row_idx, target_col, item)
+                    else:
+                        d_info = det.get(item_name)
+                        if not d_info:
+                            for k, v in det.items():
+                                if k.strip().lower() == item_name.strip().lower():
+                                    d_info = v
+                                    break
+                        if not d_info:
+                            d_info = {}
 
-                    tot = d_info.get("total", 0)
-                    ac = d_info.get("acertos", 0)
-                    n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                        tot = d_info.get("total", 0)
+                        ac = d_info.get("acertos", 0)
+                        n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
 
-                    item = QTableWidgetItem(f"{n_disc:.2f}")
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    self.tbl_results.setItem(row_idx, target_col, item)
+                        item = QTableWidgetItem(f"{n_disc:.2f}")
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        self.tbl_results.setItem(row_idx, target_col, item)
 
-            # Coluna Resumo (Total / Nota Final) no índice fixo summary_col_idx
+            curr_c = start_data_col + num_mid
+
+            # Coluna Total (em Geral)
             if view_mode == "geral":
                 tot_item = QTableWidgetItem(f"{r['total_acertos']}/{r['total_questoes']}")
-            else:
-                tot_item = QTableWidgetItem(f"{r['nota_final']:.2f}")
+                tot_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.tbl_results.setItem(row_idx, curr_c, tot_item)
+                curr_c += 1
 
-            tot_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.tbl_results.setItem(row_idx, summary_col_idx, tot_item)
+            # Coluna Redação
+            if possui_redacao:
+                n_red = r.get("nota_redacao")
+                n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
+                red_item = QTableWidgetItem(n_red_str)
+                red_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.tbl_results.setItem(row_idx, curr_c, red_item)
+                curr_c += 1
+
+            # Coluna Nota Final
+            if (possui_redacao or view_mode != "geral") and view_mode != "disciplina":
+                n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
+                if view_mode == "geral":
+                    fn_val = float(r.get("total_acertos", 0)) + n_red_val
+                else:
+                    fn_val = float(r.get("nota_final", 0.0)) + n_red_val
+
+                fn_item = QTableWidgetItem(f"{fn_val:.2f}")
+                fn_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.tbl_results.setItem(row_idx, curr_c, fn_item)
+                curr_c += 1
 
             # Coluna de Ação (Boletim Individual) EXCLUSIVAMENTE NO ÍNDICE FIXO action_col_idx
             btn_view = QPushButton("Boletim Individual")
@@ -454,7 +529,18 @@ class ReportsTab(QWidget):
             self.lbl_card_count.setText("<b>Total Alunos:</b> 0")
             return
 
-        notas = [r["nota_final"] for r in results]
+        possui_redacao = bool(self.current_exam.get("possui_redacao", False)) if self.current_exam else False
+        view_mode = self.combo_view_mode.currentData() or "geral"
+
+        notas = []
+        for r in results:
+            n_red_val = (r.get("nota_redacao") or 0.0) if possui_redacao else 0.0
+            if view_mode == "geral":
+                val = float(r.get("total_acertos", 0)) + n_red_val
+            else:
+                val = float(r.get("nota_final", 0.0)) + n_red_val
+            notas.append(val)
+
         avg = sum(notas) / len(notas)
         max_n = max(notas)
         min_n = min(notas)
@@ -539,16 +625,28 @@ class ReportsTab(QWidget):
             QMessageBox.warning(self, "Aviso", "Selecione uma prova com resultados antes de imprimir.")
             return
 
+        possui_redacao = bool(self.current_exam.get("possui_redacao", False))
         view_mode = self.combo_view_mode.currentData() or "geral"
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        if view_mode == "disciplina":
-            printer.setPageOrientation(QPageLayout.Orientation.Landscape)
-        else:
-            printer.setPageOrientation(QPageLayout.Orientation.Portrait)
+        orientation = QPageLayout.Orientation.Landscape if view_mode == "disciplina" else QPageLayout.Orientation.Portrait
+
+        # Configurar margens reduzidas (5mm em todos os lados) para a tabela ocupar mais espaço na página A4
+        page_layout = printer.pageLayout()
+        page_layout.setOrientation(orientation)
+        page_layout.setUnits(QPageLayout.Unit.Millimeter)
+        page_layout.setMargins(QMarginsF(5.0, 5.0, 5.0, 5.0))
+        printer.setPageLayout(page_layout)
         
         dialog = QPrintDialog(printer, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Re-aplicar margens reduzidas no layout da impressora selecionada
+            p_layout = printer.pageLayout()
+            p_layout.setUnits(QPageLayout.Unit.Millimeter)
+            p_layout.setMargins(QMarginsF(5.0, 5.0, 5.0, 5.0))
+            printer.setPageLayout(p_layout)
+
             doc = QTextDocument()
+            doc.setDocumentMargin(0)
             turma_sub = self.get_current_turma_subtitle()
             
             b_map_info = self._get_block_mapping(self.current_exam)
@@ -580,78 +678,140 @@ class ReportsTab(QWidget):
             mid_siglas = [get_acronym(m) for m in mid_full]
             group_title = "Acertos" if view_mode == "geral" else "Notas"
 
-            # HTML com suporte a Retrato (Portrait), Colspan no topo e SEM a coluna Ação na impressão
+            right_headers = []
+            if view_mode == "geral":
+                right_headers.append("Total Acertos")
+            if possui_redacao:
+                red_title = "RED" if view_mode == "disciplina" else "Redação"
+                right_headers.append(red_title)
+            if (possui_redacao or view_mode != "geral") and view_mode != "disciplina":
+                right_headers.append("Nota Final")
+
+            # HTML com margens zeradas no body, @page de 5mm e tabela ocupando 100% de largura
+            logo_path, _ = self.exporter._get_branding()
+            logo_img_tag = ""
+            if logo_path and os.path.exists(logo_path):
+                img = QImage(logo_path)
+                if not img.isNull():
+                    doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl("logo://brand"), img)
+                    logo_img_tag = '<img src="logo://brand" class="logo-img">'
+
             html = """
             <html>
             <head>
             <style>
-                body { font-family: Arial, sans-serif; margin: 10px; color: #1E293B; }
-                h2 { color: #242D64; margin-bottom: 2px; }
+                @page { margin: 5mm; }
+                body { font-family: Arial, sans-serif; margin: 0; padding: 0; color: #1E293B; }
+                .header-table { width: 100%; border-collapse: collapse; margin: 0 0 6px 0; border: none; }
+                .header-td-left { border: none !important; text-align: left; vertical-align: middle; padding: 0 !important; }
+                .header-td-right { border: none !important; text-align: right; vertical-align: middle; padding: 0 !important; }
+                .logo-img { max-height: 48px; max-width: 180px; display: inline-block; }
+                h2 { color: #242D64; margin-bottom: 2px; margin-top: 0; }
                 h3 { color: #64748B; margin-top: 0; font-size: 11pt; }
-                p { font-size: 9pt; color: #475569; }
-                table { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-top: 10px; }
-                th { background-color: #242D64; color: white; padding: 5px; font-weight: bold; text-align: center; border: 1px solid #CBD5E1; }
-                th.group-th { background-color: #1E293B; text-align: center; font-size: 9.5pt; font-weight: bold; }
-                td { padding: 4px; border: 1px solid #E2E8F0; text-align: center; white-space: nowrap; }
-                td.left { text-align: left; }
+                p { font-size: 9pt; color: #475569; margin: 3px 0; }
+                table.data-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-top: 6px; }
+                table.data-table th { background-color: #242D64; color: white; padding: 4px 2px; font-weight: bold; text-align: center; border: 1px solid #CBD5E1; }
+                table.data-table th.group-th { background-color: #1E293B; text-align: center; font-size: 9.5pt; font-weight: bold; }
+                table.data-table td { padding: 3px 2px; border: 1px solid #E2E8F0; text-align: center; white-space: nowrap; }
+                table.data-table td.left { text-align: left; }
                 .aluno-nome { white-space: nowrap; word-break: keep-all; }
+                .legend-box { margin-top: 6px; margin-bottom: 6px; padding: 5px 8px; border: 1px solid #CBD5E1; background-color: #F8FAFC; font-size: 8pt; color: #334155; }
             </style>
             </head>
             <body>
             """
-            html += f"<h2>Relatório de Prova: {self.current_exam['nome']} (Modo: {view_mode.upper()})</h2>"
-            html += f"<h3>Subtítulo: {turma_sub}</h3>"
-            html += f"<p><b>Data:</b> {self.current_exam['data']} | <b>Alunos Processados:</b> {len(self.current_results)}</p>"
-            html += "<table>"
+
+            if logo_img_tag:
+                html += f"""
+                <table class="header-table">
+                    <tr>
+                        <td class="header-td-left">
+                            <h2>Relatório de Prova: {self.current_exam['nome']} (Modo: {view_mode.upper()})</h2>
+                            <h3>{turma_sub}</h3>
+                            <p><b>Data:</b> {self.current_exam['data']} | <b>Alunos Processados:</b> {len(self.current_results)}</p>
+                        </td>
+                        <td class="header-td-right">
+                            {logo_img_tag}
+                        </td>
+                    </tr>
+                </table>
+                """
+            else:
+                html += f"<h2>Relatório de Prova: {self.current_exam['nome']} (Modo: {view_mode.upper()})</h2>"
+                html += f"<h3>{turma_sub}</h3>"
+                html += f"<p><b>Data:</b> {self.current_exam['data']} | <b>Alunos Processados:</b> {len(self.current_results)}</p>"
+            
+            leg_map = get_legend_mapping(mid_full, possesses_redacao=possui_redacao)
+            if leg_map:
+                leg_items = [f"<b>{k}</b> = {v}" for k, v in leg_map.items()]
+                html += f"<div class='legend-box'><b>Legenda:</b> {' | '.join(leg_items)}</div>"
+
+            html += "<table class='data-table'>"
             
             # Linha 1 do Header (Colspan cobrindo a tabela impressa - SEM Ação)
-            total_cols_count_print = 4 + len(mid_siglas) + 1
+            total_cols_count_print = 5 + len(mid_siglas) + len(right_headers)
             html += f"<tr><th colspan='{total_cols_count_print}' class='group-th'>{group_title.upper()}</th></tr>"
 
             # Linha 2 do Header (SEM a coluna Ação)
-            html += "<tr><th>Matrícula</th><th>Aluno</th><th>Turma</th><th>Tipo</th>"
+            html += "<tr><th></th><th>Matrícula</th><th>Aluno</th><th>Turma</th><th>Tipo</th>"
             for sigla in mid_siglas:
                 html += f"<th>{sigla}</th>"
-            if view_mode == "geral":
-                html += "<th>Total Acertos</th></tr>"
-            else:
-                html += "<th>Nota Final</th></tr>"
+            for rh in right_headers:
+                html += f"<th>{rh}</th>"
+            html += "</tr>"
             
             # Linhas de Dados (SEM a coluna Ação)
-            for r in self.current_results:
+            for row_idx, r in enumerate(self.current_results):
                 det = r.get("detalhes_disciplinas", {})
                 aluno_nome = str(r['aluno_nome']).replace("\n", " ").replace("\r", "")
-                html += f"<tr><td>{r['aluno_matricula']}</td><td class='left aluno-nome'><nobr>{aluno_nome}</nobr></td><td>{r['aluno_turma']}</td><td>{r['tipo_prova']}</td>"
+                html += f"<tr><td>{row_idx + 1}</td><td>{r['aluno_matricula']}</td><td class='left aluno-nome'><nobr>{aluno_nome}</nobr></td><td>{r['aluno_turma']}</td><td>{r['tipo_prova']}</td>"
                 
                 if view_mode == "geral":
                     for b_name in mid_full:
                         b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
                         html += f"<td>{b_ac}</td>"
-                    html += f"<td><b>{r['total_acertos']}/{r['total_questoes']}</b></td></tr>"
+                    html += f"<td><b>{r['total_acertos']}/{r['total_questoes']}</b></td>"
                 elif view_mode == "bloco":
                     for b_name in mid_full:
                         b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
                         b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
                         b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
                         html += f"<td>{b_nota:.2f}</td>"
-                    html += f"<td><b>{r['nota_final']:.2f}</b></td></tr>"
                 else: # disciplina
                     for d_name in mid_full:
-                        d_info = det.get(d_name)
-                        if not d_info:
-                            for k, v in det.items():
-                                if k.strip().lower() == d_name.strip().lower():
-                                    d_info = v
-                                    break
-                        if not d_info:
-                            d_info = {}
+                        if not is_subject_applicable_to_tipo(d_name, r.get("tipo_prova", "")):
+                            html += "<td>-</td>"
+                        else:
+                            d_info = det.get(d_name)
+                            if not d_info:
+                                for k, v in det.items():
+                                    if k.strip().lower() == d_name.strip().lower():
+                                        d_info = v
+                                        break
+                            if not d_info:
+                                d_info = {}
 
-                        tot = d_info.get("total", 0)
-                        ac = d_info.get("acertos", 0)
-                        n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                        html += f"<td>{n_disc:.2f}</td>"
-                    html += f"<td><b>{r['nota_final']:.2f}</b></td></tr>"
+                            tot = d_info.get("total", 0)
+                            ac = d_info.get("acertos", 0)
+                            n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                            html += f"<td>{n_disc:.2f}</td>"
+
+                if possui_redacao:
+                    n_red = r.get("nota_redacao")
+                    n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
+                    html += f"<td>{n_red_str}</td>"
+
+                if (possui_redacao or view_mode != "geral") and view_mode != "disciplina":
+                    n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
+                    if view_mode == "geral":
+                        fn_val = float(r.get("total_acertos", 0)) + n_red_val
+                    else:
+                        fn_val = float(r.get("nota_final", 0.0)) + n_red_val
+                    html += f"<td><b>{fn_val:.2f}</b></td>"
+
+                html += "</tr>"
             
             html += "</table></body></html>"
             doc.setHtml(html)
             doc.print(printer)
+

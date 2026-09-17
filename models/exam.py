@@ -14,6 +14,7 @@ class ExamModel:
         gabaritos: Dict[str, str], 
         bloco_ids: Optional[List[int]] = None, 
         valor_total: float = 10.0, 
+        possui_redacao: bool = False,
         layout_config: Optional[Dict[str, Any]] = None
     ) -> int:
         nome = str(nome).strip()
@@ -33,6 +34,7 @@ class ExamModel:
             raise ValueError("Todos os tipos de gabarito da prova devem possuir o mesmo número de questões.")
 
         layout_json = json.dumps(layout_config or {}, ensure_ascii=False)
+        int_redacao = 1 if possui_redacao else 0
 
         # Garantir ausência de blocos duplicados (proteção contra redundância)
         unique_bloco_ids = list(dict.fromkeys(bloco_ids or []))
@@ -41,9 +43,9 @@ class ExamModel:
         with self.db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
-                INSERT INTO provas (nome, data, bloco_id, valor_total, layout_config)
-                VALUES (?, ?, ?, ?, ?)
-            """, (nome, data, first_bloco_id, valor_total, layout_json))
+                INSERT INTO provas (nome, data, bloco_id, valor_total, possui_redacao, layout_config)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (nome, data, first_bloco_id, valor_total, int_redacao, layout_json))
             exam_id = cur.lastrowid
 
             # Inserir gabaritos
@@ -71,6 +73,7 @@ class ExamModel:
         gabaritos: Dict[str, str], 
         bloco_ids: Optional[List[int]] = None, 
         valor_total: float = 10.0, 
+        possui_redacao: bool = False,
         layout_config: Optional[Dict[str, Any]] = None
     ):
         nome = str(nome).strip()
@@ -90,6 +93,7 @@ class ExamModel:
             raise ValueError("Todos os tipos de gabarito da prova devem possuir o mesmo número de questões.")
 
         layout_json = json.dumps(layout_config or {}, ensure_ascii=False)
+        int_redacao = 1 if possui_redacao else 0
         unique_bloco_ids = list(dict.fromkeys(bloco_ids or []))
         first_bloco_id = unique_bloco_ids[0] if unique_bloco_ids else None
 
@@ -97,9 +101,9 @@ class ExamModel:
             cur = conn.cursor()
             cur.execute("""
                 UPDATE provas
-                SET nome = ?, data = ?, bloco_id = ?, valor_total = ?, layout_config = ?
+                SET nome = ?, data = ?, bloco_id = ?, valor_total = ?, possui_redacao = ?, layout_config = ?
                 WHERE id = ?
-            """, (nome, data, first_bloco_id, valor_total, layout_json, exam_id))
+            """, (nome, data, first_bloco_id, valor_total, int_redacao, layout_json, exam_id))
 
             cur.execute("DELETE FROM prova_gabaritos WHERE prova_id = ?", (exam_id,))
             for tipo, respostas in gabaritos.items():
@@ -136,6 +140,7 @@ class ExamModel:
                 return None
 
             exam = dict(row)
+            exam["possui_redacao"] = bool(exam.get("possui_redacao", 0))
             if exam["layout_config"]:
                 try:
                     exam["layout_config"] = json.loads(exam["layout_config"])
@@ -175,6 +180,7 @@ class ExamModel:
             exams = []
             for row in rows:
                 exam = dict(row)
+                exam["possui_redacao"] = bool(exam.get("possui_redacao", 0))
                 if exam["layout_config"]:
                     try:
                         exam["layout_config"] = json.loads(exam["layout_config"])

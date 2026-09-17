@@ -19,7 +19,8 @@ class ProcessingModel:
         total_acertos: int,
         total_questoes: int,
         detalhes_disciplinas: Dict[str, Any],
-        aluno_id: Optional[int] = None
+        aluno_id: Optional[int] = None,
+        nota_redacao: Optional[float] = None
     ) -> int:
         detalhes_json = json.dumps(detalhes_disciplinas or {}, ensure_ascii=False)
         aluno_matricula = clean_matricula(aluno_matricula)
@@ -37,34 +38,38 @@ class ProcessingModel:
             cur = conn.cursor()
             # Substituir ou atualizar caso a matrícula já tenha sido processada para a mesma prova
             cur.execute("""
-                SELECT id FROM prova_processamentos 
+                SELECT id, nota_redacao FROM prova_processamentos 
                 WHERE prova_id = ? AND aluno_matricula = ?
             """, (prova_id, aluno_matricula))
             existing = cur.fetchone()
 
             if existing:
                 proc_id = existing["id"]
+                # Preservar nota_redacao existente caso nota_redacao não seja informada
+                if nota_redacao is None and existing["nota_redacao"] is not None:
+                    nota_redacao = existing["nota_redacao"]
+
                 cur.execute("""
                     UPDATE prova_processamentos
                     SET aluno_id = ?, tipo_prova = ?, respostas_aluno = ?, status_controle = ?,
-                        nota_final = ?, percentual_acertos = ?, total_acertos = ?, total_questoes = ?,
+                        nota_final = ?, nota_redacao = ?, percentual_acertos = ?, total_acertos = ?, total_questoes = ?,
                         detalhes_disciplinas = ?
                     WHERE id = ?
                 """, (
                     aluno_id, tipo_prova, respostas_aluno, status_controle,
-                    nota_final, percentual_acertos, total_acertos, total_questoes,
+                    nota_final, nota_redacao, percentual_acertos, total_acertos, total_questoes,
                     detalhes_json, proc_id
                 ))
             else:
                 cur.execute("""
                     INSERT INTO prova_processamentos (
                         prova_id, aluno_matricula, aluno_id, tipo_prova, respostas_aluno,
-                        status_controle, nota_final, percentual_acertos, total_acertos,
+                        status_controle, nota_final, nota_redacao, percentual_acertos, total_acertos,
                         total_questoes, detalhes_disciplinas
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     prova_id, aluno_matricula, aluno_id, tipo_prova, respostas_aluno,
-                    status_controle, nota_final, percentual_acertos, total_acertos,
+                    status_controle, nota_final, nota_redacao, percentual_acertos, total_acertos,
                     total_questoes, detalhes_json
                 ))
                 proc_id = cur.lastrowid
@@ -168,9 +173,9 @@ class ProcessingModel:
                 params.extend([s_param, s_param])
 
             if sort_by == "nota_desc":
-                query += " ORDER BY p.nota_final DESC, aluno_nome ASC"
+                query += " ORDER BY (p.total_acertos + COALESCE(p.nota_redacao, 0.0)) DESC, aluno_nome ASC"
             elif sort_by == "nota_asc":
-                query += " ORDER BY p.nota_final ASC, aluno_nome ASC"
+                query += " ORDER BY (p.total_acertos + COALESCE(p.nota_redacao, 0.0)) ASC, aluno_nome ASC"
             elif sort_by == "matricula":
                 query += " ORDER BY p.aluno_matricula ASC"
             else:
@@ -194,4 +199,21 @@ class ProcessingModel:
         with self.db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("DELETE FROM prova_processamentos WHERE prova_id = ?", (prova_id,))
+            conn.commit()
+
+    def update_essay_grades(self, prova_id: int, grades: Dict[str, Optional[float]]):
+        """
+        Atualiza as notas de redação dos alunos para uma prova específica.
+        :param prova_id: ID da prova
+        :param grades: Dicionário mapeando aluno_matricula para nota (float ou None)
+        """
+        with self.db.get_connection() as conn:
+            cur = conn.cursor()
+            for mat, nota in grades.items():
+                cleaned_mat = clean_matricula(mat)
+                cur.execute("""
+                    UPDATE prova_processamentos
+                    SET nota_redacao = ?
+                    WHERE prova_id = ? AND aluno_matricula = ?
+                """, (nota, prova_id, cleaned_mat))
             conn.commit()

@@ -1,5 +1,7 @@
 from typing import Dict, Any, List, Optional
 
+from services.abbreviations import is_subject_applicable_to_tipo
+
 class GradingEngine:
     def __init__(self, exam: Dict[str, Any]):
         """
@@ -32,11 +34,11 @@ class GradingEngine:
         subjects_config = self.layout_config.get("subjects", [])
         question_weights = self.layout_config.get("weights", {})  # {str(q_num): peso}
 
-        # Construir mapa de disciplina por questão (1-indexed) considerando o tipo de prova
+        # Construir mapa de disciplina por questão (1-indexed) considerando o tipo de prova (ex: Inglês para Tipo 1 / Espanhol para Tipo 2)
         q_to_subject = {}
         tipo_subjects = [
             s for s in subjects_config 
-            if not s.get("tipo") or str(s.get("tipo")).strip().lower() == tipo_str.lower()
+            if is_subject_applicable_to_tipo(s.get("nome", ""), tipo_str, s.get("tipo"))
         ]
 
         # Verificar partes / etapas da prova (se houver divisão)

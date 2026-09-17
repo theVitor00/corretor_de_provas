@@ -108,11 +108,11 @@ def test_export_and_ui_data_integrity(qapp, test_db, tmp_path):
                     assert widget is None
 
             if mode == "disciplina":
-                bio_col_idx = 6
+                bio_col_idx = 7
                 bio_item = tbl.item(row, bio_col_idx)
                 assert bio_item is not None and bio_item.text() == "9.00"
 
-                his_col_idx = 7
+                his_col_idx = 8
                 his_item = tbl.item(row, his_col_idx)
                 assert his_item is not None and his_item.text() == "10.00"
 

@@ -3,7 +3,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QDialog,
     QFormLayout, QMessageBox, QGroupBox, QSpinBox, QDoubleSpinBox,
-    QDateEdit, QListWidget, QListWidgetItem
+    QDateEdit, QListWidget, QListWidgetItem, QRadioButton, QButtonGroup,
+    QScrollArea, QFrame
 )
 from PyQt6.QtCore import Qt, QDate
 from models.exam import ExamModel
@@ -241,7 +242,8 @@ class ExamFormDialog(QDialog):
         self.exam_data = exam_data
         self.setWindowTitle("Editar Prova" if exam_data else "Nova Prova")
         self.setWindowIcon(qta.icon('fa5s.file-signature', color='#242D64'))
-        self.resize(800, 720)
+        self.resize(980, 560)
+        self.setMinimumSize(850, 460)
         self.partes_list = [] # [{"parte_num": 1, "nome": "Parte 1", "num_questoes": 45, "q_start": 1, "q_end": 45}]
         self.gabaritos_map = {}  # {"1": "ABCDE...", "2": "..."}
         self.gabaritos_por_parte = {} # {"1": {1: "ABC...", 2: "DEF..."}}
@@ -251,6 +253,19 @@ class ExamFormDialog(QDialog):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+
+        # Scroll Area para garantir ajuste dinâmico em telas pequenas
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+
+        content_widget = QWidget()
+        h_columns = QHBoxLayout(content_widget)
+        h_columns.setContentsMargins(4, 4, 4, 4)
+        h_columns.setSpacing(12)
+
+        # Coluna da Esquerda (Dados Básicos, Partes, Blocos)
+        v_col_left = QVBoxLayout()
 
         # Dados Básicos
         gb_basic = QGroupBox("Dados Básicos da Prova")
@@ -266,10 +281,23 @@ class ExamFormDialog(QDialog):
         self.spin_valor.setValue(10.0)
         self.spin_valor.setSingleStep(1.0)
 
+        # Radio buttons para Redação (Sim / Não)
+        h_redacao = QHBoxLayout()
+        self.rb_redacao_sim = QRadioButton("Sim")
+        self.rb_redacao_nao = QRadioButton("Não")
+        self.rb_redacao_nao.setChecked(True)
+        self.bg_redacao = QButtonGroup(self)
+        self.bg_redacao.addButton(self.rb_redacao_sim)
+        self.bg_redacao.addButton(self.rb_redacao_nao)
+        h_redacao.addWidget(self.rb_redacao_sim)
+        h_redacao.addWidget(self.rb_redacao_nao)
+        h_redacao.addStretch()
+
         f_basic.addRow("Nome da Prova *:", self.txt_nome)
         f_basic.addRow("Data da Prova *:", self.txt_data)
         f_basic.addRow("Valor Total da Prova (Pontos):", self.spin_valor)
-        layout.addWidget(gb_basic)
+        f_basic.addRow("Possui Redação? *:", h_redacao)
+        v_col_left.addWidget(gb_basic)
 
         # Divisões / Partes da Prova (Dias / Etapas estilo ENEM)
         gb_partes = QGroupBox("Divisões / Partes da Prova (Etapas/Dias)")
@@ -294,7 +322,7 @@ class ExamFormDialog(QDialog):
         self.list_partes = QListWidget()
         self.list_partes.setMaximumHeight(80)
         l_partes.addWidget(self.list_partes)
-        layout.addWidget(gb_partes)
+        v_col_left.addWidget(gb_partes)
 
         # Blocos de Disciplinas
         gb_blocos = QGroupBox("Blocos de Disciplinas da Prova")
@@ -324,8 +352,11 @@ class ExamFormDialog(QDialog):
         self.list_blocos = QListWidget()
         self.list_blocos.setMaximumHeight(75)
         l_blocos.addWidget(self.list_blocos)
+        v_col_left.addWidget(gb_blocos)
+        v_col_left.addStretch()
 
-        layout.addWidget(gb_blocos)
+        # Coluna da Direita (Tipos e Gabaritos, Mapeamento)
+        v_col_right = QVBoxLayout()
 
         # Tipos e Gabaritos
         gb_gab = QGroupBox("Tipos de Prova e Gabaritos")
@@ -353,9 +384,9 @@ class ExamFormDialog(QDialog):
         self.tbl_gabaritos.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_gabaritos.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.tbl_gabaritos.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.tbl_gabaritos.setMaximumHeight(120)
         l_gab.addWidget(self.tbl_gabaritos)
-
-        layout.addWidget(gb_gab)
+        v_col_right.addWidget(gb_gab)
 
         # Mapeamento por Disciplinas e Tipo
         gb_map = QGroupBox("Mapeamento Posicional por Disciplina, Tipo e Parte")
@@ -380,8 +411,14 @@ class ExamFormDialog(QDialog):
         self.list_map = QListWidget()
         self.list_map.setMaximumHeight(85)
         l_map.addWidget(self.list_map)
+        v_col_right.addWidget(gb_map)
+        v_col_right.addStretch()
 
-        layout.addWidget(gb_map)
+        h_columns.addLayout(v_col_left, 1)
+        h_columns.addLayout(v_col_right, 1)
+
+        scroll_area.setWidget(content_widget)
+        layout.addWidget(scroll_area)
 
         # Populate if editing
         if self.exam_data:
@@ -391,6 +428,11 @@ class ExamFormDialog(QDialog):
                 self.txt_data.setDate(q_date)
 
             self.spin_valor.setValue(float(self.exam_data.get("valor_total", 10.0)))
+            if self.exam_data.get("possui_redacao"):
+                self.rb_redacao_sim.setChecked(True)
+            else:
+                self.rb_redacao_nao.setChecked(True)
+
             self.gabaritos_map = self.exam_data.get("gabaritos", {})
             cfg = self.exam_data.get("layout_config", {})
             self.partes_list = cfg.get("partes", [])
@@ -551,6 +593,7 @@ class ExamFormDialog(QDialog):
         nome = self.txt_nome.text().strip()
         data = self.txt_data.date().toString("yyyy-MM-dd")
         valor_total = self.spin_valor.value()
+        possui_redacao = self.rb_redacao_sim.isChecked()
         bloco_ids = [b["id"] for b in self.selected_blocos]
 
         if not nome or not data:
@@ -572,12 +615,12 @@ class ExamFormDialog(QDialog):
             if self.exam_data:
                 self.exam_model.update_exam(
                     self.exam_data["id"], nome, data, self.gabaritos_map,
-                    bloco_ids=bloco_ids, valor_total=valor_total, layout_config=layout_config
+                    bloco_ids=bloco_ids, valor_total=valor_total, possui_redacao=possui_redacao, layout_config=layout_config
                 )
             else:
                 self.exam_model.create_exam(
                     nome, data, self.gabaritos_map,
-                    bloco_ids=bloco_ids, valor_total=valor_total, layout_config=layout_config
+                    bloco_ids=bloco_ids, valor_total=valor_total, possui_redacao=possui_redacao, layout_config=layout_config
                 )
             self.accept()
         except Exception as e:
@@ -613,9 +656,9 @@ class ExamsTab(QWidget):
         l_hist = QVBoxLayout(gb_history)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Data", "Nome da Prova", "Bloco(s)", "Tipos de Gabarito", "Total Alunos", "Ações"
+            "ID", "Data", "Nome da Prova", "Bloco(s)", "Tipos de Gabarito", "Redação", "Total Alunos", "Ações"
         ])
         self.table.verticalHeader().setDefaultSectionSize(44)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -624,8 +667,9 @@ class ExamsTab(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(6, 440)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(7, 440)
 
         l_hist.addWidget(self.table)
         layout.addWidget(gb_history)
@@ -653,7 +697,13 @@ class ExamsTab(QWidget):
             
             tipos_str = ", ".join(e.get("gabaritos", {}).keys())
             self.table.setItem(row_idx, 4, QTableWidgetItem(tipos_str))
-            self.table.setItem(row_idx, 5, QTableWidgetItem(str(e.get("total_processados", 0))))
+
+            redacao_str = "Sim" if e.get("possui_redacao") else "Não"
+            item_red = QTableWidgetItem(redacao_str)
+            item_red.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row_idx, 5, item_red)
+
+            self.table.setItem(row_idx, 6, QTableWidgetItem(str(e.get("total_processados", 0))))
 
             btn_panel = QWidget()
             btn_layout = QHBoxLayout(btn_panel)
@@ -689,7 +739,7 @@ class ExamsTab(QWidget):
             btn_layout.addWidget(btn_edit)
             btn_layout.addWidget(btn_del)
 
-            self.table.setCellWidget(row_idx, 6, btn_panel)
+            self.table.setCellWidget(row_idx, 7, btn_panel)
 
     def new_exam(self):
         dlg = ExamFormDialog(self.exam_model, self.subject_model, self)

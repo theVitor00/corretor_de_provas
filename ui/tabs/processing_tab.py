@@ -4,9 +4,9 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QFileDialog,
     QDialog, QFormLayout, QMessageBox, QGroupBox, QProgressBar,
-    QRadioButton, QButtonGroup, QScrollArea
+    QRadioButton, QButtonGroup, QScrollArea, QStyledItemDelegate, QAbstractItemDelegate
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QEvent
 from models.exam import ExamModel
 from models.student import StudentModel
 from models.processing import ProcessingModel
@@ -153,6 +153,279 @@ class HeaderFixDialog(QDialog):
         }
 
 
+import csv
+from database import clean_matricula
+
+class EnterNextRowDelegate(QStyledItemDelegate):
+    """
+    Delegate para capturar a tecla Enter/Return ao finalizar a edição de uma célula,
+    aplicar estilo de editor centralizado com padding e mover a seleção automaticamente para a linha seguinte (estilo Excel).
+    """
+    def __init__(self, table_widget: QTableWidget, parent=None):
+        super().__init__(parent)
+        self.table_widget = table_widget
+
+    def createEditor(self, parent, option, index):
+        editor = super().createEditor(parent, option, index)
+        if isinstance(editor, QLineEdit):
+            editor.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            editor.setStyleSheet("""
+                QLineEdit {
+                    background-color: #FFFFFF;
+                    border: 2px solid #242D64;
+                    border-radius: 4px;
+                    padding: 2px 8px;
+                    font-weight: bold;
+                    font-size: 13px;
+                }
+            """)
+        return editor
+
+    def eventFilter(self, editor, event):
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self.commitData.emit(editor)
+                self.closeEditor.emit(editor, QAbstractItemDelegate.EndEditHint.NoHint)
+                
+                curr_row = self.table_widget.currentRow()
+                if curr_row < self.table_widget.rowCount() - 1:
+                    next_row = curr_row + 1
+                    self.table_widget.setCurrentCell(next_row, 2)
+                    next_item = self.table_widget.item(next_row, 2)
+                    if next_item:
+                        self.table_widget.editItem(next_item)
+                return True
+        return super().eventFilter(editor, event)
+
+
+class ExcelTableWidget(QTableWidget):
+    """
+    Tabela customizada que avança para a linha seguinte ao pressionar Enter na visualização das células.
+    """
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            curr_row = self.currentRow()
+            if curr_row < self.rowCount() - 1:
+                next_row = curr_row + 1
+                self.setCurrentCell(next_row, 2)
+                next_item = self.item(next_row, 2)
+                if next_item:
+                    self.editItem(next_item)
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
+
+class EssayGradesDialog(QDialog):
+    """
+    Diálogo para inserção manual e importação em lotes (.csv) de notas de redação.
+    """
+    def __init__(self, exam: dict, processing_model: ProcessingModel, parent=None):
+        super().__init__(parent)
+        self.exam = exam
+        self.processing_model = processing_model
+        self.setWindowTitle(f"Lançamento de Notas de Redação - {exam['nome']}")
+        self.setWindowIcon(qta.icon('fa5s.pen-nib', color='#242D64'))
+        self.resize(620, 520)
+        self.results = self.processing_model.list_results_for_exam(exam["id"])
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+
+        # Header Info
+        info_lbl = QLabel(
+            f"<b>Prova:</b> {self.exam['nome']} | <b>Data:</b> {self.exam['data']}<br>"
+            "Insira manualmente as notas de redação dos alunos na coluna <b>Nota</b> ou importe em lotes via arquivo CSV.<br>"
+            "<i>Nota: Notações decimais com ponto (ex: 19.5) e vírgula (ex: 19,5) são aceitas igualmente. Ao pressionar Enter, o cursor avança para o próximo aluno.</i>"
+        )
+        info_lbl.setWordWrap(True)
+        layout.addWidget(info_lbl)
+
+        # Action Bar (Import CSV)
+        h_tools = QHBoxLayout()
+        btn_csv = QPushButton("Enviar em Lotes (.csv)")
+        btn_csv.setIcon(qta.icon('fa5s.file-csv', color='white'))
+        btn_csv.setObjectName("btnNavy")
+        btn_csv.clicked.connect(self.import_csv)
+
+        h_tools.addWidget(btn_csv)
+        h_tools.addStretch()
+        layout.addLayout(h_tools)
+
+        # Label de grupo Redação
+        gb_redacao = QGroupBox("Redação")
+        gb_layout = QVBoxLayout(gb_redacao)
+        gb_layout.setContentsMargins(20, 10, 20, 10)
+
+        # Tabela com as três colunas solicitadas: Matrícula, Nome, Nota (com navegação estilo Excel por Enter)
+        self.tbl_grades = ExcelTableWidget()
+        self.delegate = EnterNextRowDelegate(self.tbl_grades, self)
+        self.tbl_grades.setItemDelegateForColumn(2, self.delegate)
+
+        self.tbl_grades.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tbl_grades.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+
+        self.tbl_grades.setStyleSheet("""
+            QTableWidget {
+                gridline-color: #CBD5E1;
+                font-size: 13px;
+            }
+            QTableWidget::item:selected {
+                background-color: #DBEAFE;
+                color: #1E293B;
+                font-weight: bold;
+            }
+        """)
+
+        self.tbl_grades.setColumnCount(3)
+        self.tbl_grades.setHorizontalHeaderLabels(["Matrícula", "Nome", "Nota"])
+        self.tbl_grades.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tbl_grades.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.tbl_grades.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.tbl_grades.setColumnWidth(2, 160)
+
+        self.tbl_grades.setRowCount(len(self.results))
+        for row_idx, r in enumerate(self.results):
+            # Matrícula (read-only)
+            item_mat = QTableWidgetItem(str(r["aluno_matricula"]))
+            item_mat.setFlags(item_mat.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            item_mat.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tbl_grades.setItem(row_idx, 0, item_mat)
+
+            # Nome (read-only)
+            item_nome = QTableWidgetItem(str(r["aluno_nome"]))
+            item_nome.setFlags(item_nome.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.tbl_grades.setItem(row_idx, 1, item_nome)
+
+            # Nota (editable)
+            n_red = r.get("nota_redacao")
+            if n_red is not None:
+                n_str = f"{n_red:.2f}".replace(".", ",")
+            else:
+                n_str = ""
+
+            item_nota = QTableWidgetItem(n_str)
+            item_nota.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tbl_grades.setItem(row_idx, 2, item_nota)
+
+        gb_layout.addWidget(self.tbl_grades)
+        layout.addWidget(gb_redacao)
+
+        # Footer Actions
+        btn_box = QHBoxLayout()
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setIcon(qta.icon('fa5s.times', color='#242D64'))
+        btn_cancel.setObjectName("btnSecondary")
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_save = QPushButton("Salvar Notas de Redação")
+        btn_save.setIcon(qta.icon('fa5s.save', color='white'))
+        btn_save.setObjectName("btnNavy")
+        btn_save.clicked.connect(self.save_grades)
+
+        btn_box.addWidget(btn_cancel)
+        btn_box.addWidget(btn_save)
+        layout.addLayout(btn_box)
+
+    def import_csv(self):
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Selecionar Arquivo CSV de Redação", "", "Arquivos CSV (*.csv);;Todos os Arquivos (*.*)"
+        )
+        if not filepath:
+            return
+
+        imported_count = 0
+        errors = []
+
+        try:
+            with open(filepath, mode="r", encoding="utf-8-sig", errors="ignore") as f:
+                first_line = f.readline()
+                f.seek(0)
+                delimiter = ";" if ";" in first_line and "," not in first_line else ","
+                reader = csv.reader(f, delimiter=delimiter)
+
+                mat_to_row = {}
+                for row_idx in range(self.tbl_grades.rowCount()):
+                    mat = clean_matricula(self.tbl_grades.item(row_idx, 0).text())
+                    mat_to_row[mat] = row_idx
+
+                for line_idx, cols in enumerate(reader, start=1):
+                    if not cols or len(cols) < 2:
+                        continue
+
+                    raw_mat = cols[0].strip()
+                    raw_nota = cols[1].strip()
+
+                    if line_idx == 1 and not raw_mat.isdigit() and ("matr" in raw_mat.lower() or "nota" in raw_nota.lower()):
+                        continue
+
+                    mat_cleaned = clean_matricula(raw_mat)
+                    if mat_cleaned in mat_to_row:
+                        row_target = mat_to_row[mat_cleaned]
+                        try:
+                            nota_val = self.parse_grade_val(raw_nota)
+                            nota_formatted = f"{nota_val:.2f}".replace(".", ",")
+                            self.tbl_grades.item(row_target, 2).setText(nota_formatted)
+                            imported_count += 1
+                        except ValueError:
+                            errors.append(f"Linha {line_idx}: nota inválida '{raw_nota}' para a matrícula '{raw_mat}'")
+                    else:
+                        errors.append(f"Linha {line_idx}: matrícula '{raw_mat}' não encontrada nos alunos desta prova")
+
+            msg = f"{imported_count} nota(s) de redação importada(s) do CSV com sucesso!"
+            if errors:
+                msg += f"\n\nAvisos ({len(errors)}):\n" + "\n".join(errors[:5])
+                if len(errors) > 5:
+                    msg += f"\n... e mais {len(errors) - 5} avisos."
+                QMessageBox.warning(self, "Resultado da Importação CSV", msg)
+            else:
+                QMessageBox.information(self, "Sucesso", msg)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Erro na Leitura do CSV", f"Erro ao ler arquivo CSV:\n{str(e)}")
+
+    def parse_grade_val(self, text: str) -> float:
+        if text is None:
+            raise ValueError("Vazio")
+        s = str(text).strip().replace(",", ".")
+        if not s:
+            raise ValueError("Vazio")
+        val = float(s)
+        if val < 0:
+            raise ValueError("Nota negativa")
+        return val
+
+    def save_grades(self):
+        grades_dict = {}
+        for r in range(self.tbl_grades.rowCount()):
+            mat = self.tbl_grades.item(r, 0).text()
+            cell_nota = self.tbl_grades.item(r, 2)
+            nota_text = cell_nota.text().strip() if cell_nota else ""
+
+            if not nota_text:
+                grades_dict[mat] = None
+            else:
+                try:
+                    val = self.parse_grade_val(nota_text)
+                    grades_dict[mat] = val
+                except ValueError:
+                    QMessageBox.warning(
+                        self, "Nota Inválida",
+                        f"A nota '{nota_text}' inserida para a matrícula {mat} é inválida."
+                    )
+                    self.tbl_grades.setCurrentCell(r, 2)
+                    return
+
+        try:
+            self.processing_model.update_essay_grades(self.exam["id"], grades_dict)
+            QMessageBox.information(self, "Sucesso", "Notas de redação salvas com sucesso no banco de dados!")
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Erro ao Salvar", f"Erro ao salvar notas no banco de dados:\n{str(e)}")
+
+
 class ProcessingTab(QWidget):
     def __init__(self, on_view_results_request=None, parent=None):
         super().__init__(parent)
@@ -170,7 +443,6 @@ class ProcessingTab(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(4, 4, 4, 4)
 
-        # Envolver todo o conteúdo em QScrollArea para evitar corte de tela em baixas resoluções
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll_content = QWidget()
@@ -201,6 +473,14 @@ class ProcessingTab(QWidget):
         self.btn_process.setObjectName("btnNavy")
         self.btn_process.clicked.connect(self.process_dat_file)
         h_btn_proc.addWidget(self.btn_process)
+
+        self.btn_essay_grades = QPushButton("Enviar Notas de Redação")
+        self.btn_essay_grades.setIcon(qta.icon('fa5s.pen-nib', color='#242D64'))
+        self.btn_essay_grades.setObjectName("btnSecondary")
+        self.btn_essay_grades.setEnabled(False)
+        self.btn_essay_grades.setToolTip("Insira as notas de redação dos alunos após a leitura do arquivo de respostas .DAT")
+        self.btn_essay_grades.clicked.connect(self.open_essay_grades)
+        h_btn_proc.addWidget(self.btn_essay_grades)
 
         self.btn_view_res = QPushButton("Ir Para Conferência / Resultados")
         self.btn_view_res.setIcon(qta.icon('fa5s.chart-pie', color='#242D64'))
@@ -263,6 +543,7 @@ class ProcessingTab(QWidget):
     def on_exam_changed(self):
         self.selected_exam_id = self.combo_exam.currentData()
         self.btn_view_res.setEnabled(False)
+        self.btn_essay_grades.setEnabled(False)
         self.dat_file_paths.clear()
         self.file_input_widgets.clear()
         self.clear_file_input_layout()
@@ -273,6 +554,16 @@ class ProcessingTab(QWidget):
         exam = self.exam_model.get_exam_by_id(self.selected_exam_id)
         if not exam:
             return
+
+        if exam.get("possui_redacao"):
+            results = self.processing_model.list_results_for_exam(self.selected_exam_id)
+            if results:
+                self.btn_essay_grades.setEnabled(True)
+                self.btn_view_res.setEnabled(True)
+        else:
+            results = self.processing_model.list_results_for_exam(self.selected_exam_id)
+            if results:
+                self.btn_view_res.setEnabled(True)
 
         partes = exam.get("layout_config", {}).get("partes", [])
         if not partes:
@@ -457,6 +748,22 @@ class ProcessingTab(QWidget):
         QMessageBox.information(self, "Resultado do Processamento", msg)
         self.lbl_status.setText(f"Processamento concluído: {processed_count} ok, {len(all_header_errors)} para revisão.")
         self.btn_view_res.setEnabled(True)
+        if exam.get("possui_redacao"):
+            self.btn_essay_grades.setEnabled(True)
+
+    def open_essay_grades(self):
+        if not self.selected_exam_id:
+            QMessageBox.warning(self, "Aviso", "Selecione uma prova antes de lançar notas de redação.")
+            return
+        exam = self.exam_model.get_exam_by_id(self.selected_exam_id)
+        if not exam:
+            return
+        if not exam.get("possui_redacao"):
+            QMessageBox.information(self, "Aviso", "Esta prova não foi cadastrada com a opção de redação.")
+            return
+
+        dlg = EssayGradesDialog(exam, self.processing_model, parent=self)
+        dlg.exec()
 
     def populate_error_table(self, error_items: list, exam: dict, known_types: list):
         self.tbl_errors.setRowCount(len(error_items))
