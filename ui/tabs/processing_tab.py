@@ -82,55 +82,82 @@ class DuplicateStudentDialog(QDialog):
 
 class HeaderFixDialog(QDialog):
     """
-    Diálogo para correção manual de dados de cabeçalho
+    Diálogo para correção manual de dados de aluno e matrícula não encontrada.
     """
-    def __init__(self, raw_item: dict, known_types: list, parent=None):
+    def __init__(self, raw_item: dict, known_types: list, student_model: StudentModel = None, parent=None):
         super().__init__(parent)
         self.raw_item = raw_item
         self.known_types = known_types
-        self.setWindowTitle(f"Revisar Linha {raw_item['line_number']} - Código de Controle Inválido")
-        self.setWindowIcon(qta.icon('fa5s.exclamation-triangle', color='#EF4444'))
-        self.resize(440, 220)
+        self.student_model = student_model or StudentModel()
+        self.setWindowTitle(f"Corrigir Matrícula Não Encontrada - Matrícula {raw_item.get('matricula', '')}")
+        self.setWindowIcon(qta.icon('fa5s.user-edit', color='#EF4444'))
+        self.resize(520, 320)
+        self.aluno_id = None
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
 
         info_lbl = QLabel(
-            f"<b>Aviso de Leitura:</b> O código de controle inicial de 3 dígitos lido foi <b>'{self.raw_item['control']}'</b> (Esperado '000').\n"
-            "Ajuste manualmente os dados para validação."
+            f"<b>Erro de Processamento: Matrícula Não Encontrada</b><br>"
+            f"A matrícula <b>'{self.raw_item.get('matricula', '')}'</b> não consta no cadastro de alunos.<br>"
+            "Você pode corrigir a matrícula para vincular a um aluno existente ou preencher o Nome e a Turma para cadastrar o novo aluno."
         )
         info_lbl.setWordWrap(True)
         layout.addWidget(info_lbl)
 
         form = QFormLayout()
-        self.txt_control = QLineEdit(self.raw_item["control"])
-        self.txt_matricula = QLineEdit(self.raw_item["matricula"])
+
+        self.lbl_respostas = QLabel(f"<code>{self.raw_item.get('respostas', '')}</code>")
+        self.txt_matricula = QLineEdit(str(self.raw_item.get("matricula", "")))
+        self.txt_nome = QLineEdit()
+
+        self.combo_turma = QComboBox()
+        self.combo_turma.setEditable(True)
+        turmas_existentes = self.student_model.list_turmas()
+        if not turmas_existentes:
+            turmas_existentes = ["1ª Série", "2ª Série", "3ª Série"]
+        for t in turmas_existentes:
+            self.combo_turma.addItem(t)
 
         self.combo_tipo = QComboBox()
         for t in self.known_types:
-            self.combo_tipo.addItem(f"Tipo {t}", t)
-        
-        idx = self.combo_tipo.findData(self.raw_item["tipo"])
+            self.combo_tipo.addItem(f"Tipo {t}", str(t))
+
+        idx = self.combo_tipo.findData(str(self.raw_item.get("tipo", "1")))
+        if idx < 0:
+            raw_t_digits = "".join(ch for ch in str(self.raw_item.get("tipo", "")) if ch.isdigit())
+            if raw_t_digits:
+                for i in range(self.combo_tipo.count()):
+                    item_data_digits = "".join(ch for ch in str(self.combo_tipo.itemData(i)) if ch.isdigit())
+                    if item_data_digits == raw_t_digits:
+                        idx = i
+                        break
         if idx >= 0:
             self.combo_tipo.setCurrentIndex(idx)
 
-        self.lbl_raw = QLabel(f"<b>Linha Original:</b> <code>{self.raw_item['raw_line']}</code>")
+        self.lbl_status_search = QLabel("")
+        self.lbl_status_search.setWordWrap(True)
 
-        form.addRow("Linha Bruta:", self.lbl_raw)
-        form.addRow("Código de Controle (3 dígitos):", self.txt_control)
-        form.addRow("Matrícula do Aluno:", self.txt_matricula)
+        form.addRow("Respostas Registradas:", self.lbl_respostas)
+        form.addRow("Matrícula do Aluno *:", self.txt_matricula)
+        form.addRow("Nome do Aluno:", self.txt_nome)
+        form.addRow("Turma:", self.combo_turma)
         form.addRow("Tipo de Prova:", self.combo_tipo)
+        form.addRow("", self.lbl_status_search)
 
         layout.addLayout(form)
 
+        self.txt_matricula.textChanged.connect(self.on_matricula_changed)
+        self.on_matricula_changed()
+
         btn_box = QHBoxLayout()
-        btn_cancel = QPushButton("Cancelar / Ignorar Linha")
+        btn_cancel = QPushButton("Cancelar")
         btn_cancel.setIcon(qta.icon('fa5s.times', color='#242D64'))
         btn_cancel.setObjectName("btnSecondary")
         btn_cancel.clicked.connect(self.reject)
 
-        btn_save = QPushButton("Confirmar Correção")
+        btn_save = QPushButton("Salvar e Processar Prova")
         btn_save.setIcon(qta.icon('fa5s.check', color='white'))
         btn_save.setObjectName("btnNavy")
         btn_save.clicked.connect(self.validate_and_accept)
@@ -139,16 +166,57 @@ class HeaderFixDialog(QDialog):
         btn_box.addWidget(btn_save)
         layout.addLayout(btn_box)
 
+    def on_matricula_changed(self):
+        mat = clean_matricula(self.txt_matricula.text())
+        if not mat:
+            self.lbl_status_search.setText("<font color='gray'>Digite o número da matrícula.</font>")
+            self.aluno_id = None
+            return
+
+        st = self.student_model.get_by_matricula(mat)
+        if st:
+            self.aluno_id = st["id"]
+            self.txt_nome.setText(st["nome"])
+            idx_t = self.combo_turma.findText(st["turma"])
+            if idx_t >= 0:
+                self.combo_turma.setCurrentIndex(idx_t)
+            else:
+                self.combo_turma.setCurrentText(st["turma"])
+            self.lbl_status_search.setText(f"<font color='#059669'><b>Aluno Cadastrado Encontrado:</b> {st['nome']} ({st['turma']})</font>")
+        else:
+            self.aluno_id = None
+            self.lbl_status_search.setText("<font color='#D97706'><b>Matrícula não cadastrada.</b> Preencha Nome e Turma para cadastrar o aluno.</font>")
+
     def validate_and_accept(self):
-        if not self.txt_matricula.text().strip():
+        mat = clean_matricula(self.txt_matricula.text())
+        if not mat:
             QMessageBox.warning(self, "Aviso", "Informe uma matrícula válida para o aluno.")
             return
+
+        st = self.student_model.get_by_matricula(mat)
+        if st:
+            self.aluno_id = st["id"]
+        else:
+            nome = self.txt_nome.text().strip()
+            turma = self.combo_turma.currentText().strip()
+            if not nome or not turma:
+                QMessageBox.warning(
+                    self, "Preenchimento Obrigatório",
+                    f"A matrícula '{mat}' não está cadastrada.\nPreencha os campos Nome e Turma para cadastrar o aluno no sistema."
+                )
+                return
+            try:
+                self.aluno_id = self.student_model.create(mat, nome, turma)
+            except Exception as e:
+                QMessageBox.critical(self, "Erro no Cadastro", f"Erro ao cadastrar aluno:\n{str(e)}")
+                return
+
         self.accept()
 
     def get_fixed_data(self):
         return {
-            "control": self.txt_control.text().strip(),
-            "matricula": self.txt_matricula.text().strip(),
+            "matricula": clean_matricula(self.txt_matricula.text()),
+            "aluno_id": self.aluno_id,
             "tipo": self.combo_tipo.currentData()
         }
 
@@ -497,20 +565,20 @@ class ProcessingTab(QWidget):
         layout.addWidget(gb_process)
 
         # Table of Control Errors / Warnings
-        gb_errors = QGroupBox("Revisão de Erros de Cabeçalho (Linhas onde aluno[0..2] != 000)")
+        gb_errors = QGroupBox("Revisão de Erros - Matrículas Não Encontradas no Banco de Dados")
         l_errors = QVBoxLayout(gb_errors)
 
         self.tbl_errors = QTableWidget()
         self.tbl_errors.setColumnCount(6)
         self.tbl_errors.setHorizontalHeaderLabels([
-            "Linha", "Linha Bruta", "Controle Lido", "Matrícula", "Tipo", "Ação"
+            "Linha #", "Matrícula", "Tipo Prova", "Respostas Registradas", "Erro Reportado", "Ação"
         ])
         self.tbl_errors.verticalHeader().setDefaultSectionSize(32)
         self.tbl_errors.setMaximumHeight(180)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tbl_errors.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.tbl_errors.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.tbl_errors.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.tbl_errors.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_errors.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self.tbl_errors.setColumnWidth(5, 140)
@@ -646,7 +714,6 @@ class ProcessingTab(QWidget):
         parser = DatParser()
         # Dicionário de respostas por matrícula agrupado por parte: {matricula: {"tipo": str, "parts": {p_num: item_dict}}}
         student_records = {}
-        all_header_errors = []
 
         # Parsear cada arquivo .dat por parte
         for p in self.partes_config:
@@ -659,11 +726,7 @@ class ProcessingTab(QWidget):
                 return
 
             for item in parsed_items:
-                if not item["control_ok"]:
-                    all_header_errors.append(item)
-                    continue
-
-                mat = item["matricula"]
+                mat = clean_matricula(item["matricula"])
                 if not mat:
                     mat = f"SEM_MAT_{item['line_number']}"
 
@@ -678,25 +741,11 @@ class ProcessingTab(QWidget):
 
         grading_engine = GradingEngine(exam)
         processed_count = 0
+        unfound_matricula_errors = []
 
         self.processing_model.clear_exam_processings(self.selected_exam_id)
 
-        # Tratar erros de cabeçalho salvando como HEADER_ERROR
-        for err_item in all_header_errors:
-            self.processing_model.save_processing(
-                prova_id=self.selected_exam_id,
-                aluno_matricula=err_item["matricula"] or f"DESCONHECIDO_{err_item['line_number']}",
-                tipo_prova=err_item["tipo"] or (known_types[0] if known_types else "1"),
-                respostas_aluno=err_item["respostas"],
-                status_controle="HEADER_ERROR",
-                nota_final=0.0,
-                percentual_acertos=0.0,
-                total_acertos=0,
-                total_questoes=tot_q,
-                detalhes_disciplinas={}
-            )
-
-        # Unificar e Corrigir os registros válidos dos alunos
+        # Unificar e Corrigir os registros dos alunos
         for mat, record in student_records.items():
             tipo_aluno = record["tipo"]
             
@@ -718,35 +767,71 @@ class ProcessingTab(QWidget):
 
             full_respostas_str = "".join(unified_ans)
 
+            # Verificar se aluno existe no banco de dados
+            student = self.student_model.get_by_matricula(mat)
+
             try:
                 res = grading_engine.grade_student(tipo_aluno, full_respostas_str)
-                self.processing_model.save_processing(
-                    prova_id=self.selected_exam_id,
-                    aluno_matricula=mat,
-                    tipo_prova=tipo_aluno,
-                    respostas_aluno=full_respostas_str,
-                    status_controle="OK",
-                    nota_final=res["nota_final"],
-                    percentual_acertos=res["percentual_acertos"],
-                    total_acertos=res["total_acertos"],
-                    total_questoes=res["total_questoes"],
-                    detalhes_disciplinas=res["detalhes_disciplinas"]
-                )
-                processed_count += 1
+                if student:
+                    self.processing_model.save_processing(
+                        prova_id=self.selected_exam_id,
+                        aluno_matricula=mat,
+                        tipo_prova=tipo_aluno,
+                        respostas_aluno=full_respostas_str,
+                        status_controle="OK",
+                        nota_final=res["nota_final"],
+                        percentual_acertos=res["percentual_acertos"],
+                        total_acertos=res["total_acertos"],
+                        total_questoes=res["total_questoes"],
+                        detalhes_disciplinas=res["detalhes_disciplinas"],
+                        aluno_id=student["id"]
+                    )
+                    processed_count += 1
+                else:
+                    # Matrícula não encontrada no banco de dados -> Reportar erro
+                    self.processing_model.save_processing(
+                        prova_id=self.selected_exam_id,
+                        aluno_matricula=mat,
+                        tipo_prova=tipo_aluno,
+                        respostas_aluno=full_respostas_str,
+                        status_controle="MATRICULA_NAO_ENCONTRADA",
+                        nota_final=res["nota_final"],
+                        percentual_acertos=res["percentual_acertos"],
+                        total_acertos=res["total_acertos"],
+                        total_questoes=res["total_questoes"],
+                        detalhes_disciplinas=res["detalhes_disciplinas"],
+                        aluno_id=None
+                    )
+                    first_part_item = record["parts"].get(1, list(record["parts"].values())[0]) if record["parts"] else {}
+                    line_no = first_part_item.get("line_number", "-")
+                    unfound_matricula_errors.append({
+                        "line_number": line_no,
+                        "raw_line": first_part_item.get("raw_line", f"Matrícula {mat}"),
+                        "matricula": mat,
+                        "tipo": tipo_aluno,
+                        "respostas": full_respostas_str,
+                        "error_msg": "Matrícula não encontrada no banco de dados"
+                    })
             except Exception as e:
-                err_item = {"line_number": 0, "raw_line": f"Matrícula {mat}", "control": "ERR", "matricula": mat, "tipo": tipo_aluno, "error_msg": str(e)}
-                all_header_errors.append(err_item)
+                unfound_matricula_errors.append({
+                    "line_number": 0,
+                    "raw_line": f"Matrícula {mat}",
+                    "matricula": mat,
+                    "tipo": tipo_aluno,
+                    "respostas": full_respostas_str,
+                    "error_msg": str(e)
+                })
 
-        self.populate_error_table(all_header_errors, exam, known_types)
+        self.populate_error_table(unfound_matricula_errors, exam, known_types)
 
-        msg = f"Processamento concluído!\n\nAlunos corrigidos com sucesso: {processed_count}\n"
-        if all_header_errors:
-            msg += f"Aviso: Registros com falha/cabeçalho inválido: {len(all_header_errors)}\nReveja os itens na tabela de revisão abaixo."
+        msg = f"Processamento concluído!\n\nAlunos com matrícula vinculada: {processed_count}\n"
+        if unfound_matricula_errors:
+            msg += f"Aviso: Matrículas não encontradas no banco de dados: {len(unfound_matricula_errors)}\nReveja os itens na tabela abaixo para vincular ou cadastrar os alunos."
         else:
-            msg += "Todos os registros foram validados e unificados com sucesso!"
+            msg += "Todas as matrículas foram identificadas e validadas no banco de dados!"
 
         QMessageBox.information(self, "Resultado do Processamento", msg)
-        self.lbl_status.setText(f"Processamento concluído: {processed_count} ok, {len(all_header_errors)} para revisão.")
+        self.lbl_status.setText(f"Processamento concluído: {processed_count} ok, {len(unfound_matricula_errors)} matrícula(s) pendente(s).")
         self.btn_view_res.setEnabled(True)
         if exam.get("possui_redacao"):
             self.btn_essay_grades.setEnabled(True)
@@ -770,14 +855,13 @@ class ProcessingTab(QWidget):
 
         for row_idx, item in enumerate(error_items):
             self.tbl_errors.setItem(row_idx, 0, QTableWidgetItem(str(item.get("line_number", "-"))))
-            self.tbl_errors.setItem(row_idx, 1, QTableWidgetItem(item.get("raw_line", "")))
+            self.tbl_errors.setItem(row_idx, 1, QTableWidgetItem(str(item.get("matricula", ""))))
+            self.tbl_errors.setItem(row_idx, 2, QTableWidgetItem(f"Tipo {item.get('tipo', '')}"))
+            self.tbl_errors.setItem(row_idx, 3, QTableWidgetItem(item.get("respostas", "")))
             
-            c_item = QTableWidgetItem(item.get("control", ""))
-            c_item.setForeground(Qt.GlobalColor.red)
-            self.tbl_errors.setItem(row_idx, 2, c_item)
-            
-            self.tbl_errors.setItem(row_idx, 3, QTableWidgetItem(item.get("matricula", "")))
-            self.tbl_errors.setItem(row_idx, 4, QTableWidgetItem(item.get("tipo", "")))
+            err_item = QTableWidgetItem(item.get("error_msg", "Matrícula Não Encontrada"))
+            err_item.setForeground(Qt.GlobalColor.red)
+            self.tbl_errors.setItem(row_idx, 4, err_item)
 
             btn_fix = QPushButton("Corrigir Dados")
             btn_fix.setIcon(qta.icon('fa5s.wrench', color='white'))
@@ -787,7 +871,7 @@ class ProcessingTab(QWidget):
             self.tbl_errors.setCellWidget(row_idx, 5, btn_fix)
 
     def fix_header_item(self, item: dict, exam: dict, known_types: list):
-        dlg = HeaderFixDialog(item, known_types, self)
+        dlg = HeaderFixDialog(item, known_types, student_model=self.student_model, parent=self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             fixed_data = dlg.get_fixed_data()
             grading_engine = GradingEngine(exam)
@@ -804,9 +888,10 @@ class ProcessingTab(QWidget):
                     percentual_acertos=res["percentual_acertos"],
                     total_acertos=res["total_acertos"],
                     total_questoes=res["total_questoes"],
-                    detalhes_disciplinas=res["detalhes_disciplinas"]
+                    detalhes_disciplinas=res["detalhes_disciplinas"],
+                    aluno_id=fixed_data["aluno_id"]
                 )
-                QMessageBox.information(self, "Sucesso", "Correção aplicada e nota recalculada!")
+                QMessageBox.information(self, "Sucesso", "Dados do aluno atualizados e nota salva com sucesso!")
                 self.process_dat_file()
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Erro ao aplicar correção:\n{str(e)}")

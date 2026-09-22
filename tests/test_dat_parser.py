@@ -15,17 +15,17 @@ def test_dat_line_parser_valid():
     assert parsed["respostas"] == "ABCDEABCDE"
     assert parsed["error_msg"] is None
 
-def test_dat_line_parser_header_error():
+def test_dat_line_parser_discard_control():
     parser = DatParser()
-    # aluno[0..2] = "001" (diferente de 000)
+    # aluno[0..2] = "001" (controle descartado), aluno[3..6] = "0234" (matricula '234')
     line = "00102341ABCDEABCDE"
     parsed = parser.parse_line(line, line_number=2)
 
     assert parsed["control"] == "001"
-    assert parsed["control_ok"] is False
+    assert parsed["control_ok"] is True
     assert parsed["matricula"] == "234"
     assert parsed["tipo"] == "1"
-    assert parsed["error_msg"] is not None
+    assert parsed["error_msg"] is None
 
 def test_dat_file_parser(tmp_path):
     filepath = os.path.join(tmp_path, "teste.dat")
@@ -40,6 +40,6 @@ def test_dat_file_parser(tmp_path):
     assert results[0]["control_ok"] is True
     assert results[0]["matricula"] == "1234"
     
-    assert results[1]["control_ok"] is False
+    assert results[1]["control_ok"] is True
     assert results[1]["control"] == "005"
     assert results[1]["matricula"] == "9999"

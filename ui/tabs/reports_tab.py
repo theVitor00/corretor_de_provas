@@ -116,6 +116,7 @@ class ReportsTab(QWidget):
         self.combo_view_mode.addItem("Geral (Acertos por Bloco)", "geral")
         self.combo_view_mode.addItem("Por Bloco (Notas 0 a 10)", "bloco")
         self.combo_view_mode.addItem("Por Disciplina (Notas 0 a 10)", "disciplina")
+        self.combo_view_mode.addItem("Por Disciplina (Acertos)", "disciplina_acertos")
         self.combo_view_mode.currentIndexChanged.connect(self.load_results)
 
         self.combo_turma = QComboBox()
@@ -275,7 +276,7 @@ class ReportsTab(QWidget):
 
         def get_final_score(r):
             n_red = (r.get("nota_redacao") or 0.0) if possui_redacao else 0.0
-            if view_mode == "geral":
+            if view_mode in ["geral", "disciplina_acertos"]:
                 return float(r.get("total_acertos", 0)) + float(n_red)
             else:
                 return float(r.get("nota_final", 0.0)) + float(n_red)
@@ -329,10 +330,10 @@ class ReportsTab(QWidget):
             mid_headers_full = sorted(list(block_set))
             mid_headers_siglas = [get_acronym(b) for b in mid_headers_full]
             group_title = "Acertos" if view_mode == "geral" else "Notas"
-        else: # view_mode == "disciplina"
+        else: # view_mode in ["disciplina", "disciplina_acertos"]
             mid_headers_full = exam_disc_list
             mid_headers_siglas = [get_acronym(d) for d in mid_headers_full]
-            group_title = "Notas"
+            group_title = "Acertos" if view_mode == "disciplina_acertos" else "Notas"
 
         # Atualizar painel de Legenda das Siglas
         leg_map = get_legend_mapping(mid_headers_full, possesses_redacao=possui_redacao)
@@ -346,12 +347,12 @@ class ReportsTab(QWidget):
         # 3. Definição estrita da ordem das colunas da tabela GUI
         base_left = ["", "Matrícula", "Nome do Aluno", "Turma", "Tipo"]
         base_right = []
-        if view_mode == "geral":
+        if view_mode in ["geral", "disciplina_acertos"]:
             base_right.append("Total")
         if possui_redacao:
             red_label = "RED" if view_mode == "disciplina" else "Redação"
             base_right.append(red_label)
-        if (possui_redacao or view_mode != "geral") and view_mode != "disciplina":
+        if (possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]):
             base_right.append("Nota Final")
         base_right.append("Ação")
 
@@ -458,7 +459,7 @@ class ReportsTab(QWidget):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     self.tbl_results.setItem(row_idx, target_col, item)
 
-                else: # view_mode == "disciplina"
+                else: # view_mode in ["disciplina", "disciplina_acertos"]
                     if not is_subject_applicable_to_tipo(item_name, r.get("tipo_prova", "")):
                         item = QTableWidgetItem("-")
                         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -475,17 +476,25 @@ class ReportsTab(QWidget):
 
                         tot = d_info.get("total", 0)
                         ac = d_info.get("acertos", 0)
-                        n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
 
-                        item = QTableWidgetItem(f"{n_disc:.2f}")
+                        if view_mode == "disciplina_acertos":
+                            item = QTableWidgetItem(str(ac))
+                        else:
+                            n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                            item = QTableWidgetItem(f"{n_disc:.2f}")
+
                         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                         self.tbl_results.setItem(row_idx, target_col, item)
 
             curr_c = start_data_col + num_mid
 
-            # Coluna Total (em Geral)
-            if view_mode == "geral":
-                tot_item = QTableWidgetItem(f"{r['total_acertos']}/{r['total_questoes']}")
+            # Coluna Total (em Geral e Disciplina Acertos)
+            if view_mode in ["geral", "disciplina_acertos"]:
+                if view_mode == "geral":
+                    tot_str = f"{r['total_acertos']}/{r['total_questoes']}"
+                else:
+                    tot_str = str(r['total_acertos'])
+                tot_item = QTableWidgetItem(tot_str)
                 tot_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.tbl_results.setItem(row_idx, curr_c, tot_item)
                 curr_c += 1
@@ -500,7 +509,7 @@ class ReportsTab(QWidget):
                 curr_c += 1
 
             # Coluna Nota Final
-            if (possui_redacao or view_mode != "geral") and view_mode != "disciplina":
+            if (possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]):
                 n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
                 if view_mode == "geral":
                     fn_val = float(r.get("total_acertos", 0)) + n_red_val
@@ -535,7 +544,7 @@ class ReportsTab(QWidget):
         notas = []
         for r in results:
             n_red_val = (r.get("nota_redacao") or 0.0) if possui_redacao else 0.0
-            if view_mode == "geral":
+            if view_mode in ["geral", "disciplina_acertos"]:
                 val = float(r.get("total_acertos", 0)) + n_red_val
             else:
                 val = float(r.get("nota_final", 0.0)) + n_red_val
@@ -676,15 +685,15 @@ class ReportsTab(QWidget):
                 mid_full = exam_disc_list
 
             mid_siglas = [get_acronym(m) for m in mid_full]
-            group_title = "Acertos" if view_mode == "geral" else "Notas"
+            group_title = "Acertos" if view_mode in ["geral", "disciplina_acertos"] else "Notas"
 
             right_headers = []
-            if view_mode == "geral":
+            if view_mode in ["geral", "disciplina_acertos"]:
                 right_headers.append("Total Acertos")
             if possui_redacao:
                 red_title = "RED" if view_mode == "disciplina" else "Redação"
                 right_headers.append(red_title)
-            if (possui_redacao or view_mode != "geral") and view_mode != "disciplina":
+            if (possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]):
                 right_headers.append("Nota Final")
 
             # HTML com margens zeradas no body, @page de 5mm e tabela ocupando 100% de largura
@@ -770,14 +779,13 @@ class ReportsTab(QWidget):
                     for b_name in mid_full:
                         b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
                         html += f"<td>{b_ac}</td>"
-                    html += f"<td><b>{r['total_acertos']}/{r['total_questoes']}</b></td>"
                 elif view_mode == "bloco":
                     for b_name in mid_full:
                         b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
                         b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
                         b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
                         html += f"<td>{b_nota:.2f}</td>"
-                else: # disciplina
+                else: # view_mode in ["disciplina", "disciplina_acertos"]
                     for d_name in mid_full:
                         if not is_subject_applicable_to_tipo(d_name, r.get("tipo_prova", "")):
                             html += "<td>-</td>"
@@ -793,15 +801,23 @@ class ReportsTab(QWidget):
 
                             tot = d_info.get("total", 0)
                             ac = d_info.get("acertos", 0)
-                            n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                            html += f"<td>{n_disc:.2f}</td>"
+                            if view_mode == "disciplina_acertos":
+                                html += f"<td>{ac}</td>"
+                            else:
+                                n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                                html += f"<td>{n_disc:.2f}</td>"
+
+                if view_mode == "geral":
+                    html += f"<td><b>{r['total_acertos']}/{r['total_questoes']}</b></td>"
+                elif view_mode == "disciplina_acertos":
+                    html += f"<td><b>{r['total_acertos']}</b></td>"
 
                 if possui_redacao:
                     n_red = r.get("nota_redacao")
                     n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
                     html += f"<td>{n_red_str}</td>"
 
-                if (possui_redacao or view_mode != "geral") and view_mode != "disciplina":
+                if (possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]):
                     n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
                     if view_mode == "geral":
                         fn_val = float(r.get("total_acertos", 0)) + n_red_val

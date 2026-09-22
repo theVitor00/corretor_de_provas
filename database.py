@@ -7,14 +7,18 @@ DEFAULT_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corr
 
 def clean_matricula(mat: Any) -> str:
     """
-    Remove zeros à esquerda da matrícula.
-    Exemplo: '002536' -> '2536', '0001' -> '1', '0' -> '0'.
+    Remove zeros à esquerda da matrícula de 4 dígitos.
+    Se a string tiver 7 dígitos (ex: '0004502') ou 5+ dígitos começando com '000',
+    descarta os 3 primeiros caracteres de controle (aluno[0..2]).
+    Exemplo: '0004502' -> '4502', '0000502' -> '502', '0502' -> '502', '4502' -> '4502'.
     """
     if mat is None:
         return ""
     s = str(mat).strip()
     if not s:
         return ""
+    if len(s) == 7 or (len(s) > 4 and s.startswith("000")):
+        s = s[3:]
     cleaned = s.lstrip("0")
     return cleaned if cleaned else "0"
 

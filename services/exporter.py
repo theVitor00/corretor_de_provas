@@ -231,7 +231,7 @@ class ReportExporter:
             group_title = "Acertos" if view_mode == "geral" else "Notas"
         else:
             mid_full = exam_disc_list
-            group_title = "Notas"
+            group_title = "Acertos" if view_mode == "disciplina_acertos" else "Notas"
 
         # Legenda antes da tabela
         leg_map = get_legend_mapping(mid_full)
@@ -248,12 +248,12 @@ class ReportExporter:
 
         # Montar colunas finais do cabeçalho
         right_headers = []
-        if view_mode == "geral":
+        if view_mode in ["geral", "disciplina_acertos"]:
             right_headers.append("Total")
         if possui_redacao:
             red_title = "RED" if view_mode == "disciplina" else "Redação"
             right_headers.append(red_title)
-        if possui_redacao or view_mode != "geral":
+        if possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]:
             right_headers.append("Nota Final")
 
         total_cols = 5 + num_mid + len(right_headers)
@@ -289,7 +289,6 @@ class ReportExporter:
                 for b_name in mid_full:
                     b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
                     row.append(Paragraph(str(b_ac), table_cell_style))
-                row.append(Paragraph(f"{r.get('total_acertos', 0)}/{r.get('total_questoes', 0)}", table_cell_style))
 
             elif view_mode == "bloco":
                 for b_name in mid_full:
@@ -298,7 +297,7 @@ class ReportExporter:
                     b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
                     row.append(Paragraph(f"{b_nota:.2f}", table_cell_style))
 
-            else: # view_mode == "disciplina"
+            else: # view_mode in ["disciplina", "disciplina_acertos"]
                 for d_name in mid_full:
                     if not is_subject_applicable_to_tipo(d_name, r.get("tipo_prova", "")):
                         row.append(Paragraph("-", table_cell_style))
@@ -313,15 +312,23 @@ class ReportExporter:
                             d_info = {}
                         tot = d_info.get("total", 0)
                         ac = d_info.get("acertos", 0)
-                        n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                        row.append(Paragraph(f"{n_disc:.2f}", table_cell_style))
+                        if view_mode == "disciplina_acertos":
+                            row.append(Paragraph(str(ac), table_cell_style))
+                        else:
+                            n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                            row.append(Paragraph(f"{n_disc:.2f}", table_cell_style))
+
+            if view_mode == "geral":
+                row.append(Paragraph(f"{r.get('total_acertos', 0)}/{r.get('total_questoes', 0)}", table_cell_style))
+            elif view_mode == "disciplina_acertos":
+                row.append(Paragraph(str(r.get('total_acertos', 0)), table_cell_style))
 
             if possui_redacao:
                 n_red = r.get("nota_redacao")
                 n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
                 row.append(Paragraph(n_red_str, table_cell_style))
 
-            if possui_redacao or view_mode != "geral":
+            if possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]:
                 n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
                 fn_val = float(r.get("total_acertos", 0)) + n_red_val
                 row.append(Paragraph(f"<b>{fn_val:.2f}</b>", table_cell_style))
@@ -650,7 +657,7 @@ class ReportExporter:
             group_title = "Acertos" if view_mode == "geral" else "Notas"
         else:
             mid_full = exam_disc_list
-            group_title = "Notas"
+            group_title = "Acertos" if view_mode == "disciplina_acertos" else "Notas"
 
         mid_siglas = [get_acronym(m) for m in mid_full]
 
@@ -658,10 +665,13 @@ class ReportExporter:
         base_right = []
         if view_mode == "geral":
             base_right.append("Total Acertos")
+        elif view_mode == "disciplina_acertos":
+            base_right.append("Total")
+
         if possui_redacao:
             red_title = "RED" if view_mode == "disciplina" else "Redação"
             base_right.append(red_title)
-        if possui_redacao or view_mode != "geral":
+        if possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]:
             base_right.append("Nota Final")
 
         headers_l5 = base_left + mid_siglas + base_right
@@ -722,6 +732,22 @@ class ReportExporter:
                     b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
                     row_data.append(round(b_nota, 2))
 
+            elif view_mode == "disciplina_acertos":
+                for d_name in mid_full:
+                    if not is_subject_applicable_to_tipo(d_name, r.get("tipo_prova", "")):
+                        row_data.append("-")
+                    else:
+                        d_info = det.get(d_name)
+                        if not d_info:
+                            for k, v in det.items():
+                                if k.strip().lower() == d_name.strip().lower():
+                                    d_info = v
+                                    break
+                        if not d_info:
+                            d_info = {}
+                        row_data.append(d_info.get("acertos", 0))
+                row_data.append(r.get("total_acertos", 0))
+
             else: # view_mode == "disciplina"
                 for d_name in mid_full:
                     if not is_subject_applicable_to_tipo(d_name, r.get("tipo_prova", "")):
@@ -744,7 +770,7 @@ class ReportExporter:
                 n_red = r.get("nota_redacao")
                 row_data.append(round(n_red, 2) if n_red is not None else 0.0)
 
-            if possui_redacao or view_mode != "geral":
+            if possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]:
                 n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
                 fn_val = float(r.get("total_acertos", 0)) + n_red_val
                 row_data.append(round(fn_val, 2))
@@ -755,8 +781,9 @@ class ReportExporter:
             for col_idx in range(1, len(row_data) + 1):
                 c = ws.cell(row=current_row, column=col_idx)
                 c.border = thin_border
+                val = row_data[col_idx - 1]
                 if col_idx >= 6:
-                    if view_mode != "geral" or col_idx != len(row_data):
+                    if isinstance(val, float):
                         c.number_format = "0.00"
                     c.alignment = center_align
                 elif col_idx in [1, 2, 4, 5]:
@@ -840,10 +867,13 @@ class ReportExporter:
         right_headers = []
         if view_mode == "geral":
             right_headers.append("Total Acertos")
+        elif view_mode == "disciplina_acertos":
+            right_headers.append("Total")
+
         if possui_redacao:
             red_title = "RED" if view_mode == "disciplina" else "Redação"
             right_headers.append(red_title)
-        if possui_redacao or view_mode != "geral":
+        if possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]:
             right_headers.append("Nota Final")
 
         headers = ["", "Matrícula", "Aluno", "Turma", "Tipo"] + mid_siglas + right_headers
@@ -885,6 +915,25 @@ class ReportExporter:
                     row_cells[col_idx].text = f"{b_nota:.2f}"
                     col_idx += 1
 
+            elif view_mode == "disciplina_acertos":
+                for d_name in mid_full:
+                    if not is_subject_applicable_to_tipo(d_name, r.get("tipo_prova", "")):
+                        row_cells[col_idx].text = "-"
+                    else:
+                        d_info = det.get(d_name)
+                        if not d_info:
+                            for k, v in det.items():
+                                if k.strip().lower() == d_name.strip().lower():
+                                    d_info = v
+                                    break
+                        if not d_info:
+                            d_info = {}
+                        ac = d_info.get("acertos", 0)
+                        row_cells[col_idx].text = str(ac)
+                    col_idx += 1
+                row_cells[col_idx].text = str(r.get("total_acertos", 0))
+                col_idx += 1
+
             else: # view_mode == "disciplina"
                 for d_name in mid_full:
                     if not is_subject_applicable_to_tipo(d_name, r.get("tipo_prova", "")):
@@ -910,7 +959,7 @@ class ReportExporter:
                 row_cells[col_idx].text = n_red_str
                 col_idx += 1
 
-            if possui_redacao or view_mode != "geral":
+            if possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]:
                 n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
                 fn_val = float(r.get("total_acertos", 0)) + n_red_val
                 row_cells[col_idx].text = f"{fn_val:.2f}"

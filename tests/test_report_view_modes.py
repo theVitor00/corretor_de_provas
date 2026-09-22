@@ -83,7 +83,7 @@ def test_export_and_ui_data_integrity(qapp, test_db, tmp_path):
 
     tab.select_exam(exam_id)
 
-    for mode in ["geral", "bloco", "disciplina"]:
+    for mode in ["geral", "bloco", "disciplina", "disciplina_acertos"]:
         idx = tab.combo_view_mode.findData(mode)
         tab.combo_view_mode.setCurrentIndex(idx)
         tab.load_results()
@@ -116,8 +116,21 @@ def test_export_and_ui_data_integrity(qapp, test_db, tmp_path):
                 his_item = tbl.item(row, his_col_idx)
                 assert his_item is not None and his_item.text() == "10.00"
 
+            elif mode == "disciplina_acertos":
+                bio_col_idx = 7
+                bio_item = tbl.item(row, bio_col_idx)
+                assert bio_item is not None and bio_item.text() == "9"
+
+                his_col_idx = 8
+                his_item = tbl.item(row, his_col_idx)
+                assert his_item is not None and his_item.text() == "10"
+
+                tot_col_idx = 10  # 5 base + 5 disciplinas = col 10 (0-based)
+                tot_item = tbl.item(row, tot_col_idx)
+                assert tot_item is not None and tot_item.text() == "38"
+
     # 4. Testar Exportação para Arquivos (PDF, Excel, Word) - NÃO DEVE conter a coluna Ação!
-    for mode in ["geral", "bloco", "disciplina"]:
+    for mode in ["geral", "bloco", "disciplina", "disciplina_acertos"]:
         pdf_path = str(tmp_path / f"test_integ_{mode}.pdf")
         exporter.export_exam_pdf(exam, results, pdf_path, view_mode=mode)
         assert os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0

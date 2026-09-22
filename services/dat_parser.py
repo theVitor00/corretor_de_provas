@@ -58,8 +58,8 @@ class DatParser:
         tipo_val = line[m_end:t_end]
         respostas_val = line[t_end:].upper()
 
-        control_ok = (control_val == self.expected_control)
-        error_msg = None if control_ok else f"Código de controle de cabeçalho é '{control_val}' (esperado '{self.expected_control}')."
+        control_ok = True
+        error_msg = None
 
         return {
             "line_number": line_number,

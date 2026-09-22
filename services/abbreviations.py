@@ -123,7 +123,14 @@ def is_subject_applicable_to_tipo(subject_name: str, student_tipo: str, subject_
     st_clean = str(student_tipo).strip().lower()
 
     if subject_tipo is not None and str(subject_tipo).strip() != "":
-        return str(subject_tipo).strip().lower() == st_clean
+        subj_t_clean = str(subject_tipo).strip().lower()
+        if subj_t_clean == st_clean:
+            return True
+        st_digits = "".join(ch for ch in st_clean if ch.isdigit())
+        subj_digits = "".join(ch for ch in subj_t_clean if ch.isdigit())
+        if st_digits and subj_digits and st_digits == subj_digits:
+            return True
+        return False
 
     s_name_lower = str(subject_name).strip().lower()
     if "ingl" in s_name_lower:

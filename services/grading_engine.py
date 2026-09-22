@@ -25,7 +25,25 @@ class GradingEngine:
                     break
 
         if not gabarito:
-            raise ValueError(f"Gabarito para o tipo de prova '{tipo_prova}' não foi cadastrado nesta prova.")
+            # Tentar correspondência por dígitos (ex: '1' -> '1ª Série', '2' -> '2ª Série')
+            tipo_digits = "".join(ch for ch in tipo_str if ch.isdigit())
+            if tipo_digits:
+                for k, v in self.gabaritos.items():
+                    k_digits = "".join(ch for ch in k if ch.isdigit())
+                    if tipo_digits == k_digits:
+                        gabarito = v
+                        break
+
+        if not gabarito:
+            # Tentar correspondência por prefixo / contêm
+            for k, v in self.gabaritos.items():
+                if k.lower().startswith(tipo_str.lower()) or tipo_str.lower().startswith(k.lower()):
+                    gabarito = v
+                    break
+
+        if not gabarito:
+            gabs_cadastrados = ", ".join(f"'{k}'" for k in self.gabaritos.keys())
+            raise ValueError(f"Gabarito para o tipo de prova '{tipo_prova}' não foi cadastrado nesta prova. Tipos disponíveis: {gabs_cadastrados}.")
 
         num_questoes = len(gabarito)
         respostas_aluno = respostas_aluno.upper().ljust(num_questoes, " ")[:num_questoes]

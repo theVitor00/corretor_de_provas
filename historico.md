@@ -120,8 +120,28 @@ Nesta fase final de polimento, foram adicionados recursos de apoio à nota de re
 - Adicionada uma primeira coluna antes da coluna de `Matrícula` em todas as tabelas e relatórios (GUI, Impressão Direta, PDF, Excel e Word).
 - O cabeçalho desta coluna é em branco (`""`), e os dados contêm apenas a numeração sequencial dos alunos (`1, 2, 3, 4, 5...`).
 
-### 3.8 Omissão da Coluna Nota Final no Modo Por Disciplina
-- Na visualização em tela e na Impressão Direta do modo **Por Disciplina**, a coluna **Nota Final** é omitida, visto que neste modo a avaliação é focada nas notas das disciplinas individuais.
+### 3.9 Normalização de Matrícula de 4 Dígitos e Relatório de Matrículas Não Encontradas (2026-09-22 16:19:39 -03:00)
+- **Descarte de Caracteres de Controle (`aluno[0..2]`)**:
+  - A função `clean_matricula` em `database.py` e o parser `DatParser` em `services/dat_parser.py` foram atualizados para descartar os 3 primeiros caracteres de controle gerados por outro sistema (`aluno[0..2]`) para todas as comparações e operações.
+  - A matrícula extraída corresponde a `aluno[3..6]` (4 dígitos). A comparação remove zeros à esquerda, garantindo equivalência entre `0004502`, `04502` e `4502`.
+- **Relatório Restrito a Matrículas Não Encontradas (`ui/tabs/processing_tab.py`)**:
+  - O relatório de inconsistências na aba **Processar .DAT** foi ajustado para listar exclusivamente as matrículas que não foram encontradas no cadastro de alunos do banco de dados.
+- **Ação "Corrigir Dados" com Cadastro e Vínculo Manual**:
+  - A janela "Corrigir Dados" exibe o erro de matrícula não encontrada.
+  - Permite alterar a matrícula (com busca dinâmica no cadastro) ou preencher manualmente o **Nome** e a **Turma** para cadastrar o aluno na tabela `alunos` e salvar o resultado da prova em questão.
+- **Validação com Testes de Unidade**:
+  - Adicionado `tests/test_dat_matricula_and_errors.py` para validar a normalização de matrículas e o fluxo de cadastro/processamento. Todas as 25 suítes de teste estão aprovadas (`25/25 passed`).
+
+### 3.10 Modo de Visualização "Por Disciplina (Acertos)" (2026-09-22 16:48:00 -03:00)
+- **Novo Modo de Relatório (`disciplina_acertos`)**:
+  - Adicionada a 4ª opção no seletor de modo de visualização de relatórios: `"Por Disciplina (Acertos)"` (`"disciplina_acertos"`).
+  - Exibe o número exato de acertos por disciplina (valores inteiros) em vez da nota ponderada (0 a 10).
+  - Configurado para **orientação Normal/Retrato (Portrait)** nas exportações de documentos e impressão direta, otimizando o espaço da página A4.
+  - Adicionada a coluna `'Total'`, que exibe a soma total de acertos por aluno.
+- **Suporte Integrado em Todos os Formatos de Exportação e Impressão**:
+  - Atualizada a tabela GUI (`ui/tabs/reports_tab.py`), o relatório de Impressão Direta A4 (HTML Portrait), PDF (`ReportLab`), Excel (`OpenPyXL`) e Word (`Python-Docx`).
+- **Validação com Testes de Unidade**:
+  - Atualizado `tests/test_report_view_modes.py` para verificar o novo modo de visualização em todos os exportadores e na GUI. Suíte completa de testes aprovada (`25/25 passed`).
 
 ---
 
@@ -139,4 +159,5 @@ Ao estender ou modificar esta codebase, mantenha as seguintes premissas:
 
 3. **Validação de Testes**:
    - Toda alteração nas colunas da tabela GUI exige a atualização dos índices verificados em `tests/test_report_view_modes.py`.
-   - Execute sempre `python -m pytest` para validar que todas as suítes permanecem aprovadas (22/22).
+   - Execute sempre `python -m pytest` para validar que todas as suítes permanecem aprovadas (25/25).
+
