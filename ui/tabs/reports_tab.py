@@ -23,7 +23,7 @@ class GroupedHeaderView(QHeaderView):
     Cabeçalho de duas linhas customizado para QTableWidget.
     - Linha 1 (Superior): Comporta-se como uma única coluna integrada (Colspan Total)
       que se expande por todo o espaço do topo com o texto 'ACERTOS' ou 'NOTAS'.
-    - Linha 2 (Inferior): Exibe os rótulos e siglas individuais das colunas.
+    - Linha 2 (Inferior): Exibe os rótulos e siglas/nomes individuais das colunas.
     """
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
@@ -104,10 +104,19 @@ class ReportsTab(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
 
         # Filters Bar
         gb_filters = QGroupBox("Filtros e Modo de Visualização")
         h_f = QHBoxLayout(gb_filters)
+
+        self.combo_trimestre = QComboBox()
+        self.combo_trimestre.addItem("Todos os Trimestres", "Todos")
+        self.combo_trimestre.addItem("1º Trimestre", "1º Trimestre")
+        self.combo_trimestre.addItem("2º Trimestre", "2º Trimestre")
+        self.combo_trimestre.addItem("3º Trimestre", "3º Trimestre")
+        self.combo_trimestre.currentIndexChanged.connect(self.load_exams_combo)
 
         self.combo_exam = QComboBox()
         self.combo_exam.currentIndexChanged.connect(self.load_results)
@@ -133,6 +142,8 @@ class ReportsTab(QWidget):
         self.txt_search.setPlaceholderText("Buscar por nome ou matrícula...")
         self.txt_search.textChanged.connect(self.load_results)
 
+        h_f.addWidget(QLabel("Trimestre:"))
+        h_f.addWidget(self.combo_trimestre, 1)
         h_f.addWidget(QLabel("Prova:"))
         h_f.addWidget(self.combo_exam, 2)
         h_f.addWidget(QLabel("Visualização:"))
@@ -203,6 +214,8 @@ class ReportsTab(QWidget):
 
         # Table Area com Cabeçalho Unificado em Duas Linhas
         self.tbl_results = QTableWidget()
+        self.tbl_results.setAlternatingRowColors(True)
+        self.tbl_results.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.header_view = GroupedHeaderView(Qt.Orientation.Horizontal, self.tbl_results)
         self.tbl_results.setHorizontalHeader(self.header_view)
         self.tbl_results.verticalHeader().setDefaultSectionSize(44)
@@ -219,7 +232,13 @@ class ReportsTab(QWidget):
         self.combo_exam.clear()
         self.combo_exam.addItem("Selecione uma prova...", None)
 
-        for e in self.exam_model.list_exams():
+        trim_val = self.combo_trimestre.currentData()
+        exams = self.exam_model.list_exams()
+
+        for e in exams:
+            if trim_val and trim_val != "Todos":
+                if e.get("trimestre") != trim_val:
+                    continue
             self.combo_exam.addItem(f"{e['nome']} ({e['data']})", e["id"])
 
         self.combo_exam.blockSignals(False)
@@ -231,6 +250,7 @@ class ReportsTab(QWidget):
         for t in self.student_model.list_turmas():
             self.combo_turma.addItem(t, t)
         self.combo_turma.blockSignals(False)
+        self.load_results()
 
     def select_exam(self, exam_id: int):
         self.load_exams_combo()
@@ -253,6 +273,25 @@ class ReportsTab(QWidget):
             "exam_blocks": exam_block_names
         }
 
+    def get_effective_view_mode(self) -> str:
+        if not self.current_exam:
+            return self.combo_view_mode.currentData() or "geral"
+
+        view_mode = self.combo_view_mode.currentData() or "geral"
+        has_blocos = bool(self.current_exam.get("blocos_list"))
+        tipo_prova_cat = self.current_exam.get("tipo_prova", "Prova Regular")
+
+        if not has_blocos and view_mode in ["geral", "bloco"]:
+            view_mode = "disciplina"
+
+        if tipo_prova_cat == "Prova Regular":
+            if view_mode not in ["disciplina", "disciplina_acertos"]:
+                view_mode = "disciplina"
+        elif tipo_prova_cat == "Prova de Seleção":
+            view_mode = "disciplina_acertos"
+
+        return view_mode
+
     def load_results(self):
         exam_id = self.combo_exam.currentData()
         if not exam_id:
@@ -265,10 +304,12 @@ class ReportsTab(QWidget):
 
         self.current_exam = self.exam_model.get_exam_by_id(exam_id)
         possui_redacao = bool(self.current_exam.get("possui_redacao", False))
+        tipo_prova_cat = self.current_exam.get("tipo_prova", "Prova Regular")
+
         turma_val = self.combo_turma.currentData()
         sort_val = self.combo_sort.currentData()
         search_val = self.txt_search.text().strip()
-        view_mode = self.combo_view_mode.currentData() or "geral"
+        view_mode = self.get_effective_view_mode()
 
         self.current_results = self.processing_model.list_results_for_exam(
             exam_id, turma_filter=turma_val, sort_by=sort_val, search=search_val
@@ -315,7 +356,7 @@ class ReportsTab(QWidget):
 
         # 2. Determinar colunas de dados baseado no modo de visualização
         mid_headers_full = []
-        mid_headers_siglas = []
+        mid_headers_labels = []
         
         if view_mode in ["geral", "bloco"]:
             block_set = set()
@@ -328,11 +369,16 @@ class ReportsTab(QWidget):
                     block_set.add(b_name)
             
             mid_headers_full = sorted(list(block_set))
-            mid_headers_siglas = [get_acronym(b) for b in mid_headers_full]
+            mid_headers_labels = [get_acronym(b) for b in mid_headers_full]
             group_title = "Acertos" if view_mode == "geral" else "Notas"
         else: # view_mode in ["disciplina", "disciplina_acertos"]
             mid_headers_full = exam_disc_list
-            mid_headers_siglas = [get_acronym(d) for d in mid_headers_full]
+            if tipo_prova_cat == "Prova Regular" and len(mid_headers_full) <= 3:
+                # 3 disciplinas ou menos: nome por extenso
+                mid_headers_labels = mid_headers_full
+            else:
+                # 4 ou mais disciplinas: siglas
+                mid_headers_labels = [get_acronym(d) for d in mid_headers_full]
             group_title = "Acertos" if view_mode == "disciplina_acertos" else "Notas"
 
         # Atualizar painel de Legenda das Siglas
@@ -345,7 +391,7 @@ class ReportsTab(QWidget):
             self.gb_legend.setVisible(False)
 
         # 3. Definição estrita da ordem das colunas da tabela GUI
-        base_left = ["", "Matrícula", "Nome do Aluno", "Turma", "Tipo"]
+        base_left = ["", "Matrícula", "Nome do Aluno", "Turma", "Modelo"]
         base_right = []
         if view_mode in ["geral", "disciplina_acertos"]:
             base_right.append("Total")
@@ -356,7 +402,7 @@ class ReportsTab(QWidget):
             base_right.append("Nota Final")
         base_right.append("Ação")
 
-        all_column_labels = base_left + mid_headers_siglas + base_right
+        all_column_labels = base_left + mid_headers_labels + base_right
         
         start_data_col = 5
         num_mid = len(mid_headers_full)
@@ -385,27 +431,27 @@ class ReportsTab(QWidget):
             elif label == "Nota Final":
                 item.setToolTip("Nota final do aluno (Total + Redação se houver)")
 
-        # Configuração de largura das colunas
+        # Configuração responsiva de largura das colunas
         font_metrics = self.tbl_results.fontMetrics()
         max_name_px = font_metrics.horizontalAdvance("Nome do Aluno")
         for r in self.current_results:
             w = font_metrics.horizontalAdvance(str(r.get("aluno_nome", "")))
             if w > max_name_px:
                 max_name_px = w
-        aluno_col_width = max_name_px + 24
+        aluno_col_width = max(max_name_px + 24, 220)
 
         header = self.tbl_results.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # # (Index)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Matrícula
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)     # Nome do Aluno
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)          # Nome do Aluno (expande dinamicamente)
         self.tbl_results.setColumnWidth(2, aluno_col_width)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Turma
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # Tipo
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # Modelo
 
         for c_i in range(start_data_col, action_col_idx):
             header.setSectionResizeMode(c_i, QHeaderView.ResizeMode.ResizeToContents)
 
-        header.setSectionResizeMode(action_col_idx, QHeaderView.ResizeMode.Fixed)              # Ação (Boletim)
+        header.setSectionResizeMode(action_col_idx, QHeaderView.ResizeMode.Fixed) # Ação (Boletim)
         self.tbl_results.setColumnWidth(action_col_idx, 160)
 
         # 4. Preenchimento de dados garantindo rigidez total nos índices das colunas
@@ -413,20 +459,22 @@ class ReportsTab(QWidget):
         for row_idx, r in enumerate(self.current_results):
             det = r.get("detalhes_disciplinas", {})
 
-            # Colunas de identificação (0: Numeração, 1: Matrícula, 2: Nome, 3: Turma, 4: Tipo)
+            # Colunas de identificação (0: Numeração, 1: Matrícula, 2: Nome, 3: Turma, 4: Modelo)
             item_seq = QTableWidgetItem(str(row_idx + 1))
             item_seq.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.tbl_results.setItem(row_idx, 0, item_seq)
             self.tbl_results.setItem(row_idx, 1, QTableWidgetItem(str(r["aluno_matricula"])))
             self.tbl_results.setItem(row_idx, 2, QTableWidgetItem(str(r["aluno_nome"])))
             self.tbl_results.setItem(row_idx, 3, QTableWidgetItem(str(r["aluno_turma"])))
-            self.tbl_results.setItem(row_idx, 4, QTableWidgetItem(str(r["tipo_prova"])))
+            
+            modelo_str = str(r.get("modelo_prova") or r.get("tipo_prova", ""))
+            self.tbl_results.setItem(row_idx, 4, QTableWidgetItem(modelo_str))
 
             # Garantir que NENHUM widget residual permaneça nas colunas de dados
             for c_i in range(0, action_col_idx):
                 self.tbl_results.removeCellWidget(row_idx, c_i)
 
-            # Colunas do meio (disciplinas/blocos) do índice 4 até (4 + num_mid - 1)
+            # Colunas do meio (disciplinas/blocos)
             for i, item_name in enumerate(mid_headers_full):
                 target_col = start_data_col + i
 
@@ -460,7 +508,7 @@ class ReportsTab(QWidget):
                     self.tbl_results.setItem(row_idx, target_col, item)
 
                 else: # view_mode in ["disciplina", "disciplina_acertos"]
-                    if not is_subject_applicable_to_tipo(item_name, r.get("tipo_prova", "")):
+                    if not is_subject_applicable_to_tipo(item_name, modelo_str):
                         item = QTableWidgetItem("-")
                         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                         self.tbl_results.setItem(row_idx, target_col, item)
@@ -480,8 +528,12 @@ class ReportsTab(QWidget):
                         if view_mode == "disciplina_acertos":
                             item = QTableWidgetItem(str(ac))
                         else:
-                            n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                            item = QTableWidgetItem(f"{n_disc:.2f}")
+                            if tipo_prova_cat == "Prova Regular":
+                                n_disc = d_info.get("nota", round(ac * 1.0, 1))
+                                item = QTableWidgetItem(f"{n_disc:.1f}")
+                            else:
+                                n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                                item = QTableWidgetItem(f"{n_disc:.2f}")
 
                         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                         self.tbl_results.setItem(row_idx, target_col, item)
@@ -577,7 +629,7 @@ class ReportsTab(QWidget):
             QMessageBox.warning(self, "Aviso", "Selecione uma prova com resultados antes de exportar.")
             return
 
-        view_mode = self.combo_view_mode.currentData() or "geral"
+        view_mode = self.get_effective_view_mode()
         filename = f"Relatorio_{view_mode}_{self.current_exam['nome'].replace(' ', '_')}.pdf"
         filepath, _ = QFileDialog.getSaveFileName(self, "Salvar Relatório PDF", filename, "Arquivos PDF (*.pdf)")
         if filepath:
@@ -596,7 +648,7 @@ class ReportsTab(QWidget):
             QMessageBox.warning(self, "Aviso", "Selecione uma prova com resultados antes de exportar.")
             return
 
-        view_mode = self.combo_view_mode.currentData() or "geral"
+        view_mode = self.get_effective_view_mode()
         filename = f"Resultados_{view_mode}_{self.current_exam['nome'].replace(' ', '_')}.xlsx"
         filepath, _ = QFileDialog.getSaveFileName(self, "Salvar Planilha Excel", filename, "Arquivos Excel (*.xlsx)")
         if filepath:
@@ -615,7 +667,7 @@ class ReportsTab(QWidget):
             QMessageBox.warning(self, "Aviso", "Selecione uma prova com resultados antes de exportar.")
             return
 
-        view_mode = self.combo_view_mode.currentData() or "geral"
+        view_mode = self.get_effective_view_mode()
         filename = f"Relatorio_{view_mode}_{self.current_exam['nome'].replace(' ', '_')}.docx"
         filepath, _ = QFileDialog.getSaveFileName(self, "Salvar Documento Word", filename, "Arquivos Word (*.docx)")
         if filepath:
@@ -635,11 +687,13 @@ class ReportsTab(QWidget):
             return
 
         possui_redacao = bool(self.current_exam.get("possui_redacao", False))
-        view_mode = self.combo_view_mode.currentData() or "geral"
+        tipo_prova_cat = self.current_exam.get("tipo_prova", "Prova Regular")
+        view_mode = self.get_effective_view_mode()
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        orientation = QPageLayout.Orientation.Landscape if view_mode == "disciplina" else QPageLayout.Orientation.Portrait
+        
+        # Somente a prova do tipo Simulado deve ser impressa em Landscape. Todas as demais em Portrait.
+        orientation = QPageLayout.Orientation.Landscape if (tipo_prova_cat == "Simulado") else QPageLayout.Orientation.Portrait
 
-        # Configurar margens reduzidas (5mm em todos os lados) para a tabela ocupar mais espaço na página A4
         page_layout = printer.pageLayout()
         page_layout.setOrientation(orientation)
         page_layout.setUnits(QPageLayout.Unit.Millimeter)
@@ -648,7 +702,6 @@ class ReportsTab(QWidget):
         
         dialog = QPrintDialog(printer, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Re-aplicar margens reduzidas no layout da impressora selecionada
             p_layout = printer.pageLayout()
             p_layout.setUnits(QPageLayout.Unit.Millimeter)
             p_layout.setMargins(QMarginsF(5.0, 5.0, 5.0, 5.0))
@@ -684,7 +737,11 @@ class ReportsTab(QWidget):
             else:
                 mid_full = exam_disc_list
 
-            mid_siglas = [get_acronym(m) for m in mid_full]
+            if tipo_prova_cat == "Prova Regular" and len(mid_full) <= 3:
+                mid_labels = mid_full
+            else:
+                mid_labels = [get_acronym(m) for m in mid_full]
+
             group_title = "Acertos" if view_mode in ["geral", "disciplina_acertos"] else "Notas"
 
             right_headers = []
@@ -696,7 +753,14 @@ class ReportsTab(QWidget):
             if (possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]):
                 right_headers.append("Nota Final")
 
-            # HTML com margens zeradas no body, @page de 5mm e tabela ocupando 100% de largura
+            view_mode_labels = {
+                "geral": "Geral (Acertos por Bloco)",
+                "bloco": "Por Bloco (Notas 0 a 10)",
+                "disciplina": "Por Disciplina (Notas 0 a 10)",
+                "disciplina_acertos": "Por Disciplina (Acertos)"
+            }
+            modo_label = view_mode_labels.get(view_mode, view_mode.upper())
+
             logo_path, _ = self.exporter._get_branding()
             logo_img_tag = ""
             if logo_path and os.path.exists(logo_path):
@@ -705,26 +769,28 @@ class ReportsTab(QWidget):
                     doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl("logo://brand"), img)
                     logo_img_tag = '<img src="logo://brand" class="logo-img">'
 
-            html = """
+            html = f"""
             <html>
             <head>
             <style>
-                @page { margin: 5mm; }
-                body { font-family: Arial, sans-serif; margin: 0; padding: 0; color: #1E293B; }
-                .header-table { width: 100%; border-collapse: collapse; margin: 0 0 6px 0; border: none; }
-                .header-td-left { border: none !important; text-align: left; vertical-align: middle; padding: 0 !important; }
-                .header-td-right { border: none !important; text-align: right; vertical-align: middle; padding: 0 !important; }
-                .logo-img { max-height: 48px; max-width: 180px; display: inline-block; }
-                h2 { color: #242D64; margin-bottom: 2px; margin-top: 0; }
-                h3 { color: #64748B; margin-top: 0; font-size: 11pt; }
-                p { font-size: 9pt; color: #475569; margin: 3px 0; }
-                table.data-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-top: 6px; }
-                table.data-table th { background-color: #242D64; color: white; padding: 4px 2px; font-weight: bold; text-align: center; border: 1px solid #CBD5E1; }
-                table.data-table th.group-th { background-color: #1E293B; text-align: center; font-size: 9.5pt; font-weight: bold; }
-                table.data-table td { padding: 3px 2px; border: 1px solid #E2E8F0; text-align: center; white-space: nowrap; }
-                table.data-table td.left { text-align: left; }
-                .aluno-nome { white-space: nowrap; word-break: keep-all; }
-                .legend-box { margin-top: 6px; margin-bottom: 6px; padding: 5px 8px; border: 1px solid #CBD5E1; background-color: #F8FAFC; font-size: 8pt; color: #334155; }
+                @page {{ margin: 5mm; }}
+                body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; color: #1E293B; }}
+                .header-table {{ width: 100%; border-collapse: collapse; margin: 0 0 6px 0; border: none; }}
+                .header-td-left {{ border: none !important; text-align: left; vertical-align: middle; padding: 0 !important; }}
+                .header-td-right {{ border: none !important; text-align: right; vertical-align: middle; padding: 0 !important; }}
+                .logo-img {{ max-height: 48px; max-width: 180px; display: inline-block; }}
+                h2 {{ color: #242D64; margin-bottom: 2px; margin-top: 0; font-size: 14pt; }}
+                h3 {{ color: #475569; margin-top: 2px; margin-bottom: 4px; font-size: 11pt; font-weight: bold; }}
+                p {{ font-size: 9pt; color: #475569; margin: 2px 0; }}
+                table.data-table {{ width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-top: 6px; border: 1px solid #94A3B8; page-break-inside: auto; }}
+                table.data-table tr {{ page-break-inside: avoid !important; page-break-after: auto; }}
+                table.data-table tr:nth-child(even) td {{ background-color: #F8FAFC; }}
+                table.data-table th {{ background-color: #242D64; color: white; padding: 4px 2px; font-weight: bold; text-align: center; border: 1px solid #64748B !important; }}
+                table.data-table th.group-th {{ background-color: #1E293B; text-align: center; font-size: 9.5pt; font-weight: bold; border: 1px solid #475569 !important; }}
+                table.data-table td {{ padding: 3px 2px; border: 1px solid #CBD5E1 !important; text-align: center; white-space: nowrap; }}
+                table.data-table td.left {{ text-align: left; }}
+                .aluno-nome {{ white-space: nowrap; word-break: keep-all; }}
+                .legend-box {{ margin-top: 6px; margin-bottom: 6px; padding: 5px 8px; border: 1px solid #CBD5E1; background-color: #F8FAFC; font-size: 8pt; color: #334155; }}
             </style>
             </head>
             <body>
@@ -735,9 +801,10 @@ class ReportsTab(QWidget):
                 <table class="header-table">
                     <tr>
                         <td class="header-td-left">
-                            <h2>Relatório de Prova: {self.current_exam['nome']} (Modo: {view_mode.upper()})</h2>
-                            <h3>{turma_sub}</h3>
-                            <p><b>Data:</b> {self.current_exam['data']} | <b>Alunos Processados:</b> {len(self.current_results)}</p>
+                            <h2>{self.current_exam['nome']} - {self.current_exam['data']}</h2>
+                            <h3>Relatório de Prova</h3>
+                            <p><b>Turma:</b> {turma_sub}</p>
+                            <p><b>{modo_label}</b> &nbsp;|&nbsp; <b>Alunos processados:</b> {len(self.current_results)}</p>
                         </td>
                         <td class="header-td-right">
                             {logo_img_tag}
@@ -746,9 +813,10 @@ class ReportsTab(QWidget):
                 </table>
                 """
             else:
-                html += f"<h2>Relatório de Prova: {self.current_exam['nome']} (Modo: {view_mode.upper()})</h2>"
-                html += f"<h3>{turma_sub}</h3>"
-                html += f"<p><b>Data:</b> {self.current_exam['data']} | <b>Alunos Processados:</b> {len(self.current_results)}</p>"
+                html += f"<h2>{self.current_exam['nome']} - {self.current_exam['data']}</h2>"
+                html += "<h3>Relatório de Prova</h3>"
+                html += f"<p><b>Turma:</b> {turma_sub}</p>"
+                html += f"<p><b>{modo_label}</b> &nbsp;|&nbsp; <b>Alunos processados:</b> {len(self.current_results)}</p>"
             
             leg_map = get_legend_mapping(mid_full, possesses_redacao=possui_redacao)
             if leg_map:
@@ -757,23 +825,21 @@ class ReportsTab(QWidget):
 
             html += "<table class='data-table'>"
             
-            # Linha 1 do Header (Colspan cobrindo a tabela impressa - SEM Ação)
-            total_cols_count_print = 5 + len(mid_siglas) + len(right_headers)
+            total_cols_count_print = 5 + len(mid_labels) + len(right_headers)
             html += f"<tr><th colspan='{total_cols_count_print}' class='group-th'>{group_title.upper()}</th></tr>"
 
-            # Linha 2 do Header (SEM a coluna Ação)
-            html += "<tr><th></th><th>Matrícula</th><th>Aluno</th><th>Turma</th><th>Tipo</th>"
-            for sigla in mid_siglas:
-                html += f"<th>{sigla}</th>"
+            html += "<tr><th></th><th>Matrícula</th><th>Aluno</th><th>Turma</th><th>Modelo</th>"
+            for lbl in mid_labels:
+                html += f"<th>{lbl}</th>"
             for rh in right_headers:
                 html += f"<th>{rh}</th>"
             html += "</tr>"
             
-            # Linhas de Dados (SEM a coluna Ação)
             for row_idx, r in enumerate(self.current_results):
                 det = r.get("detalhes_disciplinas", {})
                 aluno_nome = str(r['aluno_nome']).replace("\n", " ").replace("\r", "")
-                html += f"<tr><td>{row_idx + 1}</td><td>{r['aluno_matricula']}</td><td class='left aluno-nome'><nobr>{aluno_nome}</nobr></td><td>{r['aluno_turma']}</td><td>{r['tipo_prova']}</td>"
+                mod_str = str(r.get("modelo_prova") or r.get("tipo_prova", ""))
+                html += f"<tr><td>{row_idx + 1}</td><td>{r['aluno_matricula']}</td><td class='left aluno-nome'><nobr>{aluno_nome}</nobr></td><td>{r['aluno_turma']}</td><td>{mod_str}</td>"
                 
                 if view_mode == "geral":
                     for b_name in mid_full:
@@ -787,7 +853,7 @@ class ReportsTab(QWidget):
                         html += f"<td>{b_nota:.2f}</td>"
                 else: # view_mode in ["disciplina", "disciplina_acertos"]
                     for d_name in mid_full:
-                        if not is_subject_applicable_to_tipo(d_name, r.get("tipo_prova", "")):
+                        if not is_subject_applicable_to_tipo(d_name, mod_str):
                             html += "<td>-</td>"
                         else:
                             d_info = det.get(d_name)
@@ -798,19 +864,23 @@ class ReportsTab(QWidget):
                                         break
                             if not d_info:
                                 d_info = {}
-
                             tot = d_info.get("total", 0)
                             ac = d_info.get("acertos", 0)
                             if view_mode == "disciplina_acertos":
                                 html += f"<td>{ac}</td>"
                             else:
-                                n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                                html += f"<td>{n_disc:.2f}</td>"
+                                if tipo_prova_cat == "Prova Regular":
+                                    n_disc = d_info.get("nota", round(ac * 1.0, 1))
+                                    html += f"<td>{n_disc:.1f}</td>"
+                                else:
+                                    n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                                    html += f"<td>{n_disc:.2f}</td>"
 
-                if view_mode == "geral":
-                    html += f"<td><b>{r['total_acertos']}/{r['total_questoes']}</b></td>"
-                elif view_mode == "disciplina_acertos":
-                    html += f"<td><b>{r['total_acertos']}</b></td>"
+                if view_mode in ["geral", "disciplina_acertos"]:
+                    if view_mode == "geral":
+                        html += f"<td>{r['total_acertos']}/{r['total_questoes']}</td>"
+                    else:
+                        html += f"<td>{r['total_acertos']}</td>"
 
                 if possui_redacao:
                     n_red = r.get("nota_redacao")
@@ -826,8 +896,8 @@ class ReportsTab(QWidget):
                     html += f"<td><b>{fn_val:.2f}</b></td>"
 
                 html += "</tr>"
-            
+
             html += "</table></body></html>"
+
             doc.setHtml(html)
             doc.print(printer)
-

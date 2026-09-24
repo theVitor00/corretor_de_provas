@@ -15,19 +15,23 @@ class ExamModel:
         bloco_ids: Optional[List[int]] = None, 
         valor_total: float = 10.0, 
         possui_redacao: bool = False,
+        tipo_prova: str = "Atividade de Rotina",
+        trimestre: str = "1º Trimestre",
         layout_config: Optional[Dict[str, Any]] = None
     ) -> int:
         nome = str(nome).strip()
         data = str(data).strip()
+        tipo_prova = str(tipo_prova or "Atividade de Rotina").strip()
+        trimestre = str(trimestre or "1º Trimestre").strip()
         if not nome or not data:
             raise ValueError("Nome e data da prova são campos obrigatórios.")
 
         if not gabaritos or not isinstance(gabaritos, dict):
-            raise ValueError("A prova precisa ter ao menos um tipo de gabarito cadastrado.")
+            raise ValueError("A prova precisa ter ao menos um modelo de gabarito cadastrado.")
 
-        tipos = list(gabaritos.keys())
-        if len(gabaritos) != len(tipos):
-            raise ValueError("O número de gabaritos da prova precisa ser rigorosamente igual à quantidade de tipos.")
+        modelos = list(gabaritos.keys())
+        if len(gabaritos) != len(modelos):
+            raise ValueError("O número de gabaritos da prova precisa ser rigorosamente igual à quantidade de modelos.")
 
         lengths = [len(resp.strip()) for resp in gabaritos.values()]
         if len(set(lengths)) > 1:
@@ -43,17 +47,17 @@ class ExamModel:
         with self.db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
-                INSERT INTO provas (nome, data, bloco_id, valor_total, possui_redacao, layout_config)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (nome, data, first_bloco_id, valor_total, int_redacao, layout_json))
+                INSERT INTO provas (nome, data, bloco_id, valor_total, possui_redacao, tipo_prova, trimestre, layout_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (nome, data, first_bloco_id, valor_total, int_redacao, tipo_prova, trimestre, layout_json))
             exam_id = cur.lastrowid
 
-            # Inserir gabaritos
-            for tipo, respostas in gabaritos.items():
+            # Inserir gabaritos (coluna modelo)
+            for mod, respostas in gabaritos.items():
                 cur.execute("""
-                    INSERT INTO prova_gabaritos (prova_id, tipo, respostas)
+                    INSERT INTO prova_gabaritos (prova_id, modelo, respostas)
                     VALUES (?, ?, ?)
-                """, (exam_id, str(tipo).strip(), str(respostas).strip().upper()))
+                """, (exam_id, str(mod).strip(), str(respostas).strip().upper()))
 
             # Inserir múltiplos blocos vinculados
             for b_id in unique_bloco_ids:
@@ -74,18 +78,22 @@ class ExamModel:
         bloco_ids: Optional[List[int]] = None, 
         valor_total: float = 10.0, 
         possui_redacao: bool = False,
+        tipo_prova: str = "Atividade de Rotina",
+        trimestre: str = "1º Trimestre",
         layout_config: Optional[Dict[str, Any]] = None
     ):
         nome = str(nome).strip()
         data = str(data).strip()
+        tipo_prova = str(tipo_prova or "Atividade de Rotina").strip()
+        trimestre = str(trimestre or "1º Trimestre").strip()
         if not nome or not data:
             raise ValueError("Nome e data da prova são campos obrigatórios.")
 
         if not gabaritos or not isinstance(gabaritos, dict):
-            raise ValueError("A prova precisa ter ao menos um tipo de gabarito cadastrado.")
+            raise ValueError("A prova precisa ter ao menos um modelo de gabarito cadastrado.")
 
-        tipos = list(gabaritos.keys())
-        if len(gabaritos) != len(tipos):
+        modelos = list(gabaritos.keys())
+        if len(gabaritos) != len(modelos):
             raise ValueError("O número de gabaritos da prova precisa ser igual à quantidade de tipos.")
 
         lengths = [len(resp.strip()) for resp in gabaritos.values()]
@@ -101,16 +109,16 @@ class ExamModel:
             cur = conn.cursor()
             cur.execute("""
                 UPDATE provas
-                SET nome = ?, data = ?, bloco_id = ?, valor_total = ?, possui_redacao = ?, layout_config = ?
+                SET nome = ?, data = ?, bloco_id = ?, valor_total = ?, possui_redacao = ?, tipo_prova = ?, trimestre = ?, layout_config = ?
                 WHERE id = ?
-            """, (nome, data, first_bloco_id, valor_total, int_redacao, layout_json, exam_id))
+            """, (nome, data, first_bloco_id, valor_total, int_redacao, tipo_prova, trimestre, layout_json, exam_id))
 
             cur.execute("DELETE FROM prova_gabaritos WHERE prova_id = ?", (exam_id,))
-            for tipo, respostas in gabaritos.items():
+            for mod, respostas in gabaritos.items():
                 cur.execute("""
-                    INSERT INTO prova_gabaritos (prova_id, tipo, respostas)
+                    INSERT INTO prova_gabaritos (prova_id, modelo, respostas)
                     VALUES (?, ?, ?)
-                """, (exam_id, str(tipo).strip(), str(respostas).strip().upper()))
+                """, (exam_id, str(mod).strip(), str(respostas).strip().upper()))
 
             cur.execute("DELETE FROM prova_blocos WHERE prova_id = ?", (exam_id,))
             for b_id in unique_bloco_ids:
@@ -141,6 +149,8 @@ class ExamModel:
 
             exam = dict(row)
             exam["possui_redacao"] = bool(exam.get("possui_redacao", 0))
+            exam["tipo_prova"] = exam.get("tipo_prova") or "Atividade de Rotina"
+            exam["trimestre"] = exam.get("trimestre", "1º Trimestre")
             if exam["layout_config"]:
                 try:
                     exam["layout_config"] = json.loads(exam["layout_config"])
@@ -149,8 +159,8 @@ class ExamModel:
             else:
                 exam["layout_config"] = {}
 
-            cur.execute("SELECT tipo, respostas FROM prova_gabaritos WHERE prova_id = ? ORDER BY tipo ASC", (exam_id,))
-            exam["gabaritos"] = {r["tipo"]: r["respostas"] for r in cur.fetchall()}
+            cur.execute("SELECT modelo, respostas FROM prova_gabaritos WHERE prova_id = ? ORDER BY modelo ASC", (exam_id,))
+            exam["gabaritos"] = {r["modelo"]: r["respostas"] for r in cur.fetchall()}
             exam["num_questoes"] = len(next(iter(exam["gabaritos"].values()))) if exam["gabaritos"] else 0
 
             # Obter blocos vinculados
@@ -181,6 +191,8 @@ class ExamModel:
             for row in rows:
                 exam = dict(row)
                 exam["possui_redacao"] = bool(exam.get("possui_redacao", 0))
+                exam["tipo_prova"] = exam.get("tipo_prova") or "Atividade de Rotina"
+                exam["trimestre"] = exam.get("trimestre", "1º Trimestre")
                 if exam["layout_config"]:
                     try:
                         exam["layout_config"] = json.loads(exam["layout_config"])
@@ -189,8 +201,8 @@ class ExamModel:
                 else:
                     exam["layout_config"] = {}
 
-                cur.execute("SELECT tipo, respostas FROM prova_gabaritos WHERE prova_id = ? ORDER BY tipo ASC", (exam["id"],))
-                gabs = {r["tipo"]: r["respostas"] for r in cur.fetchall()}
+                cur.execute("SELECT modelo, respostas FROM prova_gabaritos WHERE prova_id = ? ORDER BY modelo ASC", (exam["id"],))
+                gabs = {r["modelo"]: r["respostas"] for r in cur.fetchall()}
                 exam["gabaritos"] = gabs
                 exam["num_questoes"] = len(next(iter(gabs.values()))) if gabs else 0
                 

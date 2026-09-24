@@ -18,6 +18,8 @@ class BlockFormDialog(QDialog):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
         form = QFormLayout()
 
         self.txt_nome = QLineEdit()
@@ -58,6 +60,8 @@ class SubjectFormDialog(QDialog):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
         form = QFormLayout()
 
         self.txt_nome = QLineEdit()
@@ -125,6 +129,8 @@ class SubjectsBlocksTab(QWidget):
         l_blocos.addLayout(h_b_actions)
 
         self.tbl_blocos = QTableWidget()
+        self.tbl_blocos.setAlternatingRowColors(True)
+        self.tbl_blocos.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tbl_blocos.setColumnCount(3)
         self.tbl_blocos.setHorizontalHeaderLabels(["ID", "Nome do Bloco", "Ações"])
         self.tbl_blocos.verticalHeader().setDefaultSectionSize(44)
@@ -150,6 +156,8 @@ class SubjectsBlocksTab(QWidget):
         l_disc.addLayout(h_d_actions)
 
         self.tbl_disc = QTableWidget()
+        self.tbl_disc.setAlternatingRowColors(True)
+        self.tbl_disc.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tbl_disc.setColumnCount(4)
         self.tbl_disc.setHorizontalHeaderLabels(["ID", "Nome", "Bloco", "Ações"])
         self.tbl_disc.verticalHeader().setDefaultSectionSize(44)

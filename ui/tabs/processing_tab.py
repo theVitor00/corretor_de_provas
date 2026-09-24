@@ -329,6 +329,7 @@ class EssayGradesDialog(QDialog):
 
         # Tabela com as três colunas solicitadas: Matrícula, Nome, Nota (com navegação estilo Excel por Enter)
         self.tbl_grades = ExcelTableWidget()
+        self.tbl_grades.setAlternatingRowColors(True)
         self.delegate = EnterNextRowDelegate(self.tbl_grades, self)
         self.tbl_grades.setItemDelegateForColumn(2, self.delegate)
 
@@ -569,6 +570,8 @@ class ProcessingTab(QWidget):
         l_errors = QVBoxLayout(gb_errors)
 
         self.tbl_errors = QTableWidget()
+        self.tbl_errors.setAlternatingRowColors(True)
+        self.tbl_errors.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tbl_errors.setColumnCount(6)
         self.tbl_errors.setHorizontalHeaderLabels([
             "Linha #", "Matrícula", "Tipo Prova", "Respostas Registradas", "Erro Reportado", "Ação"
@@ -740,12 +743,10 @@ class ProcessingTab(QWidget):
                 student_records[mat]["parts"][p_num] = item
 
         grading_engine = GradingEngine(exam)
-        processed_count = 0
-        unfound_matricula_errors = []
+        batch_items = []
+        parse_errors = []
 
-        self.processing_model.clear_exam_processings(self.selected_exam_id)
-
-        # Unificar e Corrigir os registros dos alunos
+        # Unificar e Corrigir os registros dos alunos em memória
         for mat, record in student_records.items():
             tipo_aluno = record["tipo"]
             
@@ -766,54 +767,22 @@ class ProcessingTab(QWidget):
                             unified_ans[pos] = raw_part_ans[idx]
 
             full_respostas_str = "".join(unified_ans)
-
-            # Verificar se aluno existe no banco de dados
             student = self.student_model.get_by_matricula(mat)
 
             try:
                 res = grading_engine.grade_student(tipo_aluno, full_respostas_str)
-                if student:
-                    self.processing_model.save_processing(
-                        prova_id=self.selected_exam_id,
-                        aluno_matricula=mat,
-                        tipo_prova=tipo_aluno,
-                        respostas_aluno=full_respostas_str,
-                        status_controle="OK",
-                        nota_final=res["nota_final"],
-                        percentual_acertos=res["percentual_acertos"],
-                        total_acertos=res["total_acertos"],
-                        total_questoes=res["total_questoes"],
-                        detalhes_disciplinas=res["detalhes_disciplinas"],
-                        aluno_id=student["id"]
-                    )
-                    processed_count += 1
-                else:
-                    # Matrícula não encontrada no banco de dados -> Reportar erro
-                    self.processing_model.save_processing(
-                        prova_id=self.selected_exam_id,
-                        aluno_matricula=mat,
-                        tipo_prova=tipo_aluno,
-                        respostas_aluno=full_respostas_str,
-                        status_controle="MATRICULA_NAO_ENCONTRADA",
-                        nota_final=res["nota_final"],
-                        percentual_acertos=res["percentual_acertos"],
-                        total_acertos=res["total_acertos"],
-                        total_questoes=res["total_questoes"],
-                        detalhes_disciplinas=res["detalhes_disciplinas"],
-                        aluno_id=None
-                    )
-                    first_part_item = record["parts"].get(1, list(record["parts"].values())[0]) if record["parts"] else {}
-                    line_no = first_part_item.get("line_number", "-")
-                    unfound_matricula_errors.append({
-                        "line_number": line_no,
-                        "raw_line": first_part_item.get("raw_line", f"Matrícula {mat}"),
-                        "matricula": mat,
-                        "tipo": tipo_aluno,
-                        "respostas": full_respostas_str,
-                        "error_msg": "Matrícula não encontrada no banco de dados"
-                    })
+                first_part_item = record["parts"].get(1, list(record["parts"].values())[0]) if record["parts"] else {}
+                batch_items.append({
+                    "aluno_matricula": mat,
+                    "modelo_prova": tipo_aluno,
+                    "respostas_aluno": full_respostas_str,
+                    "aluno_id": student["id"] if student else None,
+                    "line_number": first_part_item.get("line_number", "-"),
+                    "raw_line": first_part_item.get("raw_line", f"Matrícula {mat}"),
+                    "grading_res": res
+                })
             except Exception as e:
-                unfound_matricula_errors.append({
+                parse_errors.append({
                     "line_number": 0,
                     "raw_line": f"Matrícula {mat}",
                     "matricula": mat,
@@ -821,6 +790,15 @@ class ProcessingTab(QWidget):
                     "respostas": full_respostas_str,
                     "error_msg": str(e)
                 })
+
+        try:
+            processed_count, unfound_matricula_errors = self.processing_model.save_batch_processing(
+                self.selected_exam_id, batch_items
+            )
+            unfound_matricula_errors.extend(parse_errors)
+        except Exception as e:
+            QMessageBox.critical(self, "Erro no Processamento", f"Ocorreu um erro ao salvar o lote no banco de dados:\n{str(e)}")
+            return
 
         self.populate_error_table(unfound_matricula_errors, exam, known_types)
 

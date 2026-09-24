@@ -24,6 +24,8 @@ class StudentFormDialog(QDialog):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
         form = QFormLayout()
 
         self.txt_matricula = QLineEdit()
@@ -78,6 +80,8 @@ class StudentDetailDialog(QDialog):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
 
         # Header Info Card
         header = QGroupBox("Informações do Aluno")
@@ -275,6 +279,8 @@ class StudentsTab(QWidget):
 
         # Table area
         self.table = QTableWidget()
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["Matrícula", "Nome", "Turma", "Ações"])
         self.table.verticalHeader().setDefaultSectionSize(44)

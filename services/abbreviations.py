@@ -85,15 +85,17 @@ def get_header_tooltip(full_name: str, mode: str = "geral") -> str:
     Retorna o texto explicativo (tooltip) para o cabeçalho de uma coluna na tabela de relatórios.
     
     :param full_name: Nome completo do bloco ou disciplina (ex: 'Linguagens, Códigos e Suas Tecnologias')
-    :param mode: 'geral', 'bloco' ou 'disciplina'
+    :param mode: 'geral', 'bloco', 'disciplina' ou 'disciplina_acertos'
     """
     sigla = get_acronym(full_name)
     if mode == "geral":
         desc = "Total de acertos do aluno neste bloco"
     elif mode == "bloco":
         desc = "Nota do bloco calculada proporcionalmente na escala de 0,00 a 10,00"
+    elif mode == "disciplina_acertos":
+        desc = "Número de acertos do aluno nesta disciplina"
     else: # disciplina
-        desc = "Nota da disciplina calculada proporcionalmente na escala de 0,00 a 10,00"
+        desc = "Nota da disciplina (número de acertos × peso das questões)"
     
     return f"{sigla} → {full_name}\n({desc})"
 
@@ -110,20 +112,20 @@ def get_legend_mapping(full_names: list, possesses_redacao: bool = False) -> dic
     return legend
 
 
-def is_subject_applicable_to_tipo(subject_name: str, student_tipo: str, subject_tipo: str = None) -> bool:
+def is_subject_applicable_to_modelo(subject_name: str, student_modelo: str, subject_modelo: str = None) -> bool:
     """
-    Verifica se a disciplina se aplica ao tipo de prova do aluno.
+    Verifica se a disciplina se aplica ao modelo de prova do aluno.
     Por exemplo:
-    - Se o tipo for 1, a disciplina de Inglês se aplica e a de Espanhol não.
-    - Se o tipo for 2, a disciplina de Espanhol se aplica e a de Inglês não.
+    - Se o modelo for 1, a disciplina de Inglês se aplica e a de Espanhol não.
+    - Se o modelo for 2, a disciplina de Espanhol se aplica e a de Inglês não.
     """
-    if not student_tipo or not subject_name:
+    if not student_modelo or not subject_name:
         return True
 
-    st_clean = str(student_tipo).strip().lower()
+    st_clean = str(student_modelo).strip().lower()
 
-    if subject_tipo is not None and str(subject_tipo).strip() != "":
-        subj_t_clean = str(subject_tipo).strip().lower()
+    if subject_modelo is not None and str(subject_modelo).strip() != "":
+        subj_t_clean = str(subject_modelo).strip().lower()
         if subj_t_clean == st_clean:
             return True
         st_digits = "".join(ch for ch in st_clean if ch.isdigit())
@@ -139,5 +141,9 @@ def is_subject_applicable_to_tipo(subject_name: str, student_tipo: str, subject_
         return "2" in st_clean or "esp" in st_clean
 
     return True
+
+# Alias retrocompatível
+is_subject_applicable_to_tipo = is_subject_applicable_to_modelo
+
 
 

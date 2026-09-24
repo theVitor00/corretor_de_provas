@@ -115,11 +115,23 @@ QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
 
 QTableWidget {
     background-color: #FFFFFF;
+    alternate-background-color: #F8FAFC;
     border: 1px solid #E2E8F0;
-    gridline-color: #F1F5F9;
+    gridline-color: #CBD5E1;
     border-radius: 6px;
-    selection-background-color: #E6F7F7;
-    selection-color: #242D64;
+    selection-background-color: #DBEAFE;
+    selection-color: #1E293B;
+}
+
+QTableWidget::item:hover {
+    background-color: #E2E8F0;
+    color: #0F172A;
+}
+
+QTableWidget::item:selected {
+    background-color: #DBEAFE;
+    color: #1E293B;
+    font-weight: bold;
 }
 
 QHeaderView::section {

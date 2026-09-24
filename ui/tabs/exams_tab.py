@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QDialog,
     QFormLayout, QMessageBox, QGroupBox, QSpinBox, QDoubleSpinBox,
     QDateEdit, QListWidget, QListWidgetItem, QRadioButton, QButtonGroup,
-    QScrollArea, QFrame
+    QScrollArea, QFrame, QCheckBox
 )
 from PyQt6.QtCore import Qt, QDate
 from models.exam import ExamModel
@@ -20,11 +20,13 @@ class AddPartDialog(QDialog):
         self.start_q = start_q
         self.setWindowTitle(f"Adicionar Divisão / Parte {parte_num}")
         self.setWindowIcon(qta.icon('fa5s.puzzle-piece', color='#242D64'))
-        self.resize(360, 200)
+        self.resize(380, 220)
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
         form = QFormLayout()
 
         self.txt_nome = QLineEdit(f"Parte {self.parte_num}")
@@ -64,102 +66,273 @@ class AddPartDialog(QDialog):
         }
 
 
-class GabaritoMultiPartDialog(QDialog):
+class GabaritoTableDialog(QDialog):
     """
-    Diálogo para entrada de gabarito dividido pelas partes da prova
+    Diálogo para exibição e edição estruturada do gabarito em tabela por questão.
+    Exibe alternativas e permite anular questões com aviso de reprocessamento.
     """
-    def __init__(self, tipo: str, partes: list, parent=None, existing_gabs: dict=None):
+    def __init__(self, modelo: str, partes: list, mapped_subjects: list = None, parent=None, existing_gabs: dict = None, existing_unified: str = ""):
         super().__init__(parent)
-        self.tipo = tipo
-        self.partes = partes
+        self.modelo = modelo
+        self.partes = partes or []
+        self.mapped_subjects = mapped_subjects or []
         self.existing_gabs = existing_gabs or {}
-        self.setWindowTitle(f"Cadastrar Gabarito para Tipo {tipo}")
-        self.setWindowIcon(qta.icon('fa5s.key', color='#242D64'))
-        self.resize(460, 260 + (len(partes) * 40))
-        self.inputs = {}
+        self.existing_unified = existing_unified or ""
+        self.has_shown_popup = False
+        self.result_partes_dict = {}
+        self.result_unified_str = ""
+
+        self.setWindowTitle(f"Editar Gabarito em Tabela - Modelo {modelo}")
+        self.setWindowIcon(qta.icon('fa5s.table', color='#242D64'))
+        self.resize(780, 560)
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
-        for p in self.partes:
-            p_num = p["parte_num"]
-            p_nome = p["nome"]
-            q_st = p["q_start"]
-            q_ed = p["q_end"]
-            n_q = p["num_questoes"]
+        # Barra superior com entrada em texto rápido
+        gb_quick = QGroupBox("Importar / Colar Sequência de Respostas")
+        h_quick = QHBoxLayout(gb_quick)
 
-            txt = QLineEdit()
-            txt.setPlaceholderText(f"Gabarito ({n_q} questões: ex: AAAAA...)")
-            if str(p_num) in self.existing_gabs:
-                txt.setText(self.existing_gabs[str(p_num)])
-            elif p_num in self.existing_gabs:
-                txt.setText(self.existing_gabs[p_num])
+        self.txt_quick = QLineEdit()
+        self.txt_quick.setPlaceholderText("Cole a sequência de respostas (ex: ABCD*ABCDE...)")
+        
+        initial_str = self.existing_unified
+        if not initial_str and self.partes:
+            full_str = ""
+            for p in self.partes:
+                p_num = p["parte_num"]
+                full_str += str(self.existing_gabs.get(str(p_num)) or self.existing_gabs.get(p_num) or ("A" * p["num_questoes"]))
+            initial_str = full_str
 
-            form.addRow(f"<b>{p_nome}</b> (Q{q_st} a Q{q_ed}):", txt)
-            self.inputs[p_num] = (txt, n_q)
+        self.txt_quick.setText(initial_str)
 
-        layout.addLayout(form)
+        btn_apply_quick = QPushButton("Aplicar Sequência")
+        btn_apply_quick.setIcon(qta.icon('fa5s.magic', color='#242D64'))
+        btn_apply_quick.setObjectName("btnSecondary")
+        btn_apply_quick.clicked.connect(self.apply_quick_string)
 
-        btn_box = QHBoxLayout()
+        h_quick.addWidget(QLabel("Gabarito Rápido:"))
+        h_quick.addWidget(self.txt_quick, 1)
+        h_quick.addWidget(btn_apply_quick)
+        layout.addWidget(gb_quick)
+
+        # Tabela principal de gabarito por questão
+        self.tbl = QTableWidget()
+        self.tbl.setColumnCount(5)
+        self.tbl.setHorizontalHeaderLabels(["Questão #", "Parte / Divisão", "Disciplina", "Gabarito (Alternativa)", "Anulação"])
+        self.tbl.verticalHeader().setDefaultSectionSize(36)
+        self.tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tbl.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.tbl.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.tbl.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+
+        layout.addWidget(self.tbl)
+
+        # Rodapé com estatísticas e botões de ação
+        h_footer = QHBoxLayout()
+        self.lbl_stats = QLabel("Total: 0 Qs | Ativas: 0 | Anuladas: 0")
+        self.lbl_stats.setStyleSheet("font-weight: bold; color: #242D64; font-size: 13px;")
+
         btn_cancel = QPushButton("Cancelar")
         btn_cancel.setIcon(qta.icon('fa5s.times', color='#242D64'))
         btn_cancel.setObjectName("btnSecondary")
         btn_cancel.clicked.connect(self.reject)
 
-        btn_save = QPushButton("Salvar Gabarito do Tipo")
+        btn_save = QPushButton("Salvar Gabarito do Modelo")
         btn_save.setIcon(qta.icon('fa5s.check', color='white'))
         btn_save.setObjectName("btnNavy")
         btn_save.clicked.connect(self.validate_and_accept)
 
-        btn_box.addWidget(btn_cancel)
-        btn_box.addWidget(btn_save)
-        layout.addLayout(btn_box)
+        h_footer.addWidget(self.lbl_stats)
+        h_footer.addStretch()
+        h_footer.addWidget(btn_cancel)
+        h_footer.addWidget(btn_save)
+        layout.addLayout(h_footer)
+
+        self.populate_table(initial_str)
+
+    def populate_table(self, gab_str: str):
+        total_q = sum(p["num_questoes"] for p in self.partes) if self.partes else len(gab_str or "A"*45)
+        if not self.partes:
+            self.partes = [{"parte_num": 1, "nome": "Parte Única", "num_questoes": total_q, "q_start": 1, "q_end": total_q}]
+
+        gab_str = (gab_str or "").upper().ljust(total_q, "A")[:total_q]
+        self.tbl.setRowCount(total_q)
+
+        for p in self.partes:
+            p_num = p["parte_num"]
+            p_nome = f"Parte {p_num}: {p['nome']}"
+            q_st = p["q_start"]
+            q_ed = p["q_end"]
+
+            for q_idx in range(q_st, q_ed + 1):
+                row_i = q_idx - 1
+                curr_char = gab_str[row_i] if row_i < len(gab_str) else "A"
+
+                item_q = QTableWidgetItem(f"Q{q_idx:02d}" if total_q >= 10 else f"Q{q_idx}")
+                item_q.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item_q.setFlags(item_q.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.tbl.setItem(row_i, 0, item_q)
+
+                item_p = QTableWidgetItem(p_nome)
+                item_p.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item_p.setFlags(item_p.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.tbl.setItem(row_i, 1, item_p)
+
+                d_name = "Geral"
+                for m in self.mapped_subjects:
+                    m_mod = str(m.get("modelo") or m.get("tipo") or "")
+                    if not m_mod or m_mod.lower() == str(self.modelo).lower():
+                        if m["start_q"] <= q_idx <= m["end_q"]:
+                            d_name = m["nome"]
+                            break
+                item_d = QTableWidgetItem(d_name)
+                item_d.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item_d.setFlags(item_d.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.tbl.setItem(row_i, 2, item_d)
+
+                combo = QComboBox()
+                combo.addItems(["A", "B", "C", "D", "E", "* (ANULADA)"])
+                is_annulled = (curr_char in ["*", "X", "ANULADA"])
+                if is_annulled:
+                    combo.setCurrentIndex(5)
+                elif curr_char in ["A", "B", "C", "D", "E"]:
+                    combo.setCurrentText(curr_char)
+                else:
+                    combo.setCurrentIndex(0)
+
+                chk = QCheckBox("Anular Questão")
+                chk.setChecked(is_annulled)
+
+                combo.currentIndexChanged.connect(lambda _, r=row_i: self.on_combo_changed(r))
+                chk.toggled.connect(lambda checked, r=row_i: self.on_chk_toggled(r, checked))
+
+                self.tbl.setCellWidget(row_i, 3, combo)
+                self.tbl.setCellWidget(row_i, 4, chk)
+
+        self.update_stats()
+
+    def on_combo_changed(self, row: int):
+        combo = self.tbl.cellWidget(row, 3)
+        chk = self.tbl.cellWidget(row, 4)
+        if not combo or not chk:
+            return
+
+        is_annulled = (combo.currentIndex() == 5)
+        chk.blockSignals(True)
+        chk.setChecked(is_annulled)
+        chk.blockSignals(False)
+
+        if is_annulled:
+            self.notify_annulment(row + 1)
+        self.update_stats()
+
+    def on_chk_toggled(self, row: int, checked: bool):
+        combo = self.tbl.cellWidget(row, 3)
+        chk = self.tbl.cellWidget(row, 4)
+        if not combo or not chk:
+            return
+
+        combo.blockSignals(True)
+        if checked:
+            combo.setCurrentIndex(5)
+            combo.blockSignals(False)
+            self.notify_annulment(row + 1)
+        else:
+            if combo.currentIndex() == 5:
+                combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+        self.update_stats()
+
+    def notify_annulment(self, q_num: int):
+        if not self.has_shown_popup:
+            self.has_shown_popup = True
+            QMessageBox.information(
+                self,
+                "Questão Anulada",
+                f"A <b>Questão {q_num}</b> foi marcada como <b>ANULADA</b>.<br><br>"
+                "Os pesos das questões ativas desta disciplina serão redistribuídos automaticamente para manter a pontuação total da prova.<br><br>"
+                "⚠️ <b>Atenção: É necessário reprocessar as respostas dos alunos na aba 'Processamento de Provas' para recalcular boletins e notas.</b>"
+            )
+
+    def apply_quick_string(self):
+        new_str = self.txt_quick.text().strip().upper()
+        if new_str:
+            self.populate_table(new_str)
+
+    def update_stats(self):
+        total_q = self.tbl.rowCount()
+        annulled_q = 0
+        for r in range(total_q):
+            chk = self.tbl.cellWidget(r, 4)
+            if chk and chk.isChecked():
+                annulled_q += 1
+        active_q = total_q - annulled_q
+        self.lbl_stats.setText(f"Total: {total_q} Qs &nbsp;|&nbsp; <font color='#16A34A'>Ativas: {active_q}</font> &nbsp;|&nbsp; <font color='#DC2626'>Anuladas: {annulled_q}</font>")
 
     def validate_and_accept(self):
-        for p_num, (txt, expected_len) in self.inputs.items():
-            gab_str = txt.text().strip().upper()
-            if not gab_str:
-                QMessageBox.warning(self, "Aviso", f"Preencha o gabarito da Parte {p_num}.")
-                return
-            if len(gab_str) != expected_len:
-                QMessageBox.warning(
-                    self, "Aviso",
-                    f"O gabarito da Parte {p_num} deve ter exatamente {expected_len} questões (informadas: {len(gab_str)})."
-                )
-                return
+        partes_dict = {}
+        unified_list = []
+
+        q_idx = 0
+        for p in self.partes:
+            p_num = p["parte_num"]
+            p_str = ""
+            for _ in range(p["num_questoes"]):
+                combo = self.tbl.cellWidget(q_idx, 3)
+                chk = self.tbl.cellWidget(q_idx, 4)
+                if chk and chk.isChecked():
+                    char = "*"
+                elif combo:
+                    c_txt = combo.currentText()
+                    char = c_txt[0] if c_txt else "A"
+                else:
+                    char = "A"
+                p_str += char
+                unified_list.append(char)
+                q_idx += 1
+            partes_dict[p_num] = p_str
+
+        self.result_partes_dict = partes_dict
+        self.result_unified_str = "".join(unified_list)
         self.accept()
 
     def get_data(self):
-        partes_dict = {}
-        unified = ""
-        for p_num, (txt, _) in self.inputs.items():
-            gab_str = txt.text().strip().upper()
-            partes_dict[p_num] = gab_str
-            unified += gab_str
-        return partes_dict, unified
+        return self.result_partes_dict, self.result_unified_str
+
+
+class GabaritoMultiPartDialog(GabaritoTableDialog):
+    """
+    Alias retrocompatível que utiliza a tabela interativa para gerenciar gabaritos.
+    """
+    pass
 
 
 class SubjectRangeDialog(QDialog):
-    def __init__(self, available_types: list, subjects_list: list, total_questions: int, partes: list=None, parent=None):
+    def __init__(self, available_models: list, subjects_list: list, total_questions: int, partes: list=None, parent=None):
         super().__init__(parent)
-        self.available_types = available_types
+        self.available_models = available_models
         self.subjects_list = subjects_list
         self.total_questions = total_questions
         self.partes = partes or []
-        self.setWindowTitle("Adicionar Mapeamento de Disciplina por Tipo de Prova")
+        self.setWindowTitle("Adicionar Mapeamento de Disciplina por Modelo de Prova")
         self.setWindowIcon(qta.icon('fa5s.layer-group', color='#242D64'))
-        self.resize(420, 260)
+        self.resize(460, 300)
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
         form = QFormLayout()
 
-        self.combo_tipo = QComboBox()
-        for t in self.available_types:
-            self.combo_tipo.addItem(f"Tipo {t}", t)
+        self.combo_modelo = QComboBox()
+        for m in self.available_models:
+            self.combo_modelo.addItem(f"Modelo {m}", m)
 
         self.combo_parte = QComboBox()
         if self.partes:
@@ -177,6 +350,12 @@ class SubjectRangeDialog(QDialog):
         self.spin_end = QSpinBox()
         self.spin_end.setRange(1, max(1, self.total_questions))
 
+        self.spin_peso = QDoubleSpinBox()
+        self.spin_peso.setRange(0.0001, 100.0)
+        self.spin_peso.setValue(1.0)
+        self.spin_peso.setSingleStep(0.0001)
+        self.spin_peso.setDecimals(4)
+
         if self.partes:
             p0 = self.partes[0]
             self.spin_start.setValue(p0["q_start"])
@@ -185,12 +364,13 @@ class SubjectRangeDialog(QDialog):
             self.spin_start.setValue(1)
             self.spin_end.setValue(max(1, self.total_questions))
 
-        form.addRow("Tipo da Prova *:", self.combo_tipo)
+        form.addRow("Modelo da Prova *:", self.combo_modelo)
         if self.partes:
             form.addRow("Parte da Prova *:", self.combo_parte)
         form.addRow("Disciplina *:", self.combo_subject)
         form.addRow("Questão Inicial *:", self.spin_start)
         form.addRow("Questão Final *:", self.spin_end)
+        form.addRow("Peso por Questão *:", self.spin_peso)
 
         layout.addLayout(form)
 
@@ -219,18 +399,24 @@ class SubjectRangeDialog(QDialog):
         if self.spin_start.value() > self.spin_end.value():
             QMessageBox.warning(self, "Aviso", "A questão inicial não pode ser maior que a questão final.")
             return
+        if self.spin_peso.value() <= 0:
+            QMessageBox.warning(self, "Aviso", "O peso da questão é obrigatório e deve ser maior que zero.")
+            return
         self.accept()
 
     def get_data(self):
         s_data = self.combo_subject.currentData()
         p_data = self.combo_parte.currentData() if self.partes else None
+        mod_val = self.combo_modelo.currentData()
         return {
-            "tipo": self.combo_tipo.currentData(),
+            "modelo": mod_val,
+            "tipo": mod_val, # compatibilidade
             "parte_num": p_data["parte_num"] if p_data else 1,
             "subject_id": s_data["id"],
             "nome": s_data["nome"],
             "start_q": self.spin_start.value(),
-            "end_q": self.spin_end.value()
+            "end_q": self.spin_end.value(),
+            "peso": float(self.spin_peso.value())
         }
 
 
@@ -242,17 +428,19 @@ class ExamFormDialog(QDialog):
         self.exam_data = exam_data
         self.setWindowTitle("Editar Prova" if exam_data else "Nova Prova")
         self.setWindowIcon(qta.icon('fa5s.file-signature', color='#242D64'))
-        self.resize(980, 560)
-        self.setMinimumSize(850, 460)
-        self.partes_list = [] # [{"parte_num": 1, "nome": "Parte 1", "num_questoes": 45, "q_start": 1, "q_end": 45}]
+        self.resize(1150, 720)
+        self.setMinimumSize(950, 580)
+        self.partes_list = []
         self.gabaritos_map = {}  # {"1": "ABCDE...", "2": "..."}
-        self.gabaritos_por_parte = {} # {"1": {1: "ABC...", 2: "DEF..."}}
-        self.mapped_subjects = [] # [{"tipo": "1", "nome": "Matemática", "start_q": 1, "end_q": 10}]
-        self.selected_blocos = [] # [{"id": 1, "nome": "Exatas"}]
+        self.gabaritos_por_parte = {}
+        self.mapped_subjects = []
+        self.selected_blocos = []
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
 
         # Scroll Area para garantir ajuste dinâmico em telas pequenas
         scroll_area = QScrollArea()
@@ -261,8 +449,8 @@ class ExamFormDialog(QDialog):
 
         content_widget = QWidget()
         h_columns = QHBoxLayout(content_widget)
-        h_columns.setContentsMargins(4, 4, 4, 4)
-        h_columns.setSpacing(12)
+        h_columns.setContentsMargins(6, 6, 6, 6)
+        h_columns.setSpacing(14)
 
         # Coluna da Esquerda (Dados Básicos, Partes, Blocos)
         v_col_left = QVBoxLayout()
@@ -275,6 +463,21 @@ class ExamFormDialog(QDialog):
         self.txt_data = QDateEdit()
         self.txt_data.setDate(QDate.currentDate())
         self.txt_data.setCalendarPopup(True)
+
+        self.combo_tipo_prova = QComboBox()
+        self.combo_tipo_prova.addItems([
+            "Prova Regular",
+            "Simulado",
+            "Prova de Seleção",
+            "Atividade de Rotina"
+        ])
+
+        self.combo_trimestre = QComboBox()
+        self.combo_trimestre.addItems([
+            "1º Trimestre",
+            "2º Trimestre",
+            "3º Trimestre"
+        ])
 
         self.spin_valor = QDoubleSpinBox()
         self.spin_valor.setRange(1.0, 1000.0)
@@ -295,6 +498,8 @@ class ExamFormDialog(QDialog):
 
         f_basic.addRow("Nome da Prova *:", self.txt_nome)
         f_basic.addRow("Data da Prova *:", self.txt_data)
+        f_basic.addRow("Tipo de Prova *:", self.combo_tipo_prova)
+        f_basic.addRow("Trimestre *:", self.combo_trimestre)
         f_basic.addRow("Valor Total da Prova (Pontos):", self.spin_valor)
         f_basic.addRow("Possui Redação? *:", h_redacao)
         v_col_left.addWidget(gb_basic)
@@ -320,12 +525,12 @@ class ExamFormDialog(QDialog):
         l_partes.addLayout(h_p_controls)
 
         self.list_partes = QListWidget()
-        self.list_partes.setMaximumHeight(80)
+        self.list_partes.setMaximumHeight(85)
         l_partes.addWidget(self.list_partes)
         v_col_left.addWidget(gb_partes)
 
         # Blocos de Disciplinas
-        gb_blocos = QGroupBox("Blocos de Disciplinas da Prova")
+        gb_blocos = QGroupBox("Blocos de Disciplinas da Prova (Opcional)")
         l_blocos = QVBoxLayout(gb_blocos)
 
         h_b_controls = QHBoxLayout()
@@ -350,50 +555,50 @@ class ExamFormDialog(QDialog):
         l_blocos.addLayout(h_b_controls)
 
         self.list_blocos = QListWidget()
-        self.list_blocos.setMaximumHeight(75)
+        self.list_blocos.setMaximumHeight(80)
         l_blocos.addWidget(self.list_blocos)
         v_col_left.addWidget(gb_blocos)
         v_col_left.addStretch()
 
-        # Coluna da Direita (Tipos e Gabaritos, Mapeamento)
+        # Coluna da Direita (Modelos e Gabaritos, Mapeamento)
         v_col_right = QVBoxLayout()
 
-        # Tipos e Gabaritos
-        gb_gab = QGroupBox("Tipos de Prova e Gabaritos")
+        # Modelos e Gabaritos
+        gb_gab = QGroupBox("Modelos de Prova e Gabaritos")
         l_gab = QVBoxLayout(gb_gab)
 
         h_g_controls = QHBoxLayout()
-        self.txt_tipo = QLineEdit()
-        self.txt_tipo.setPlaceholderText("Tipo (ex: 1, 2, A, B)")
-        self.txt_tipo.setMaximumWidth(120)
+        self.txt_modelo = QLineEdit()
+        self.txt_modelo.setPlaceholderText("Modelo (ex: 1, 2, A, B)")
+        self.txt_modelo.setMaximumWidth(130)
 
-        btn_add_gab = QPushButton("Adicionar / Editar Gabarito por Tipo")
+        btn_add_gab = QPushButton("Adicionar / Editar Gabarito por Modelo")
         btn_add_gab.setIcon(qta.icon('fa5s.key', color='white'))
         btn_add_gab.setObjectName("btnNavy")
         btn_add_gab.clicked.connect(self.add_gabarito)
 
-        h_g_controls.addWidget(QLabel("Tipo:"))
-        h_g_controls.addWidget(self.txt_tipo)
+        h_g_controls.addWidget(QLabel("Modelo:"))
+        h_g_controls.addWidget(self.txt_modelo)
         h_g_controls.addWidget(btn_add_gab)
         h_g_controls.addStretch()
         l_gab.addLayout(h_g_controls)
 
         self.tbl_gabaritos = QTableWidget()
         self.tbl_gabaritos.setColumnCount(3)
-        self.tbl_gabaritos.setHorizontalHeaderLabels(["Tipo", "Respostas do Gabarito (Completo)", "Ação"])
+        self.tbl_gabaritos.setHorizontalHeaderLabels(["Modelo", "Respostas do Gabarito (Completo)", "Ação"])
         self.tbl_gabaritos.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tbl_gabaritos.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.tbl_gabaritos.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.tbl_gabaritos.setMaximumHeight(120)
+        self.tbl_gabaritos.setMaximumHeight(130)
         l_gab.addWidget(self.tbl_gabaritos)
         v_col_right.addWidget(gb_gab)
 
-        # Mapeamento por Disciplinas e Tipo
-        gb_map = QGroupBox("Mapeamento Posicional por Disciplina, Tipo e Parte")
+        # Mapeamento por Disciplinas e Modelo
+        gb_map = QGroupBox("Mapeamento Posicional por Disciplina, Modelo e Parte")
         l_map = QVBoxLayout(gb_map)
 
         h_m_controls = QHBoxLayout()
-        btn_add_map = QPushButton("Definir Faixa por Disciplina e Tipo")
+        btn_add_map = QPushButton("Definir Faixa por Disciplina e Modelo")
         btn_add_map.setIcon(qta.icon('fa5s.layer-group', color='#242D64'))
         btn_add_map.setObjectName("btnSecondary")
         btn_add_map.clicked.connect(self.add_subject_mapping)
@@ -409,7 +614,7 @@ class ExamFormDialog(QDialog):
         l_map.addLayout(h_m_controls)
 
         self.list_map = QListWidget()
-        self.list_map.setMaximumHeight(85)
+        self.list_map.setMaximumHeight(110)
         l_map.addWidget(self.list_map)
         v_col_right.addWidget(gb_map)
         v_col_right.addStretch()
@@ -426,6 +631,16 @@ class ExamFormDialog(QDialog):
             q_date = QDate.fromString(self.exam_data["data"], "yyyy-MM-dd")
             if q_date.isValid():
                 self.txt_data.setDate(q_date)
+
+            t_prova = self.exam_data.get("tipo_prova", "Prova Regular")
+            idx_tp = self.combo_tipo_prova.findText(t_prova)
+            if idx_tp >= 0:
+                self.combo_tipo_prova.setCurrentIndex(idx_tp)
+
+            trim = self.exam_data.get("trimestre", "1º Trimestre")
+            idx_tr = self.combo_trimestre.findText(trim)
+            if idx_tr >= 0:
+                self.combo_trimestre.setCurrentIndex(idx_tr)
 
             self.spin_valor.setValue(float(self.exam_data.get("valor_total", 10.0)))
             if self.exam_data.get("possui_redacao"):
@@ -485,7 +700,6 @@ class ExamFormDialog(QDialog):
     def get_effective_partes(self):
         if self.partes_list:
             return self.partes_list
-        # Se não adicionou nenhuma parte, assumir 1 parte padrão
         total_q = 45
         if self.gabaritos_map:
             total_q = len(next(iter(self.gabaritos_map.values())))
@@ -522,46 +736,71 @@ class ExamFormDialog(QDialog):
             self.list_blocos.addItem(f"• Bloco: {b['nome']}")
 
     def add_gabarito(self):
-        tipo = self.txt_tipo.text().strip()
-        if not tipo:
-            QMessageBox.warning(self, "Aviso", "Informe o Tipo da Prova (ex: 1, 2, A, B).")
+        modelo = self.txt_modelo.text().strip()
+        if not modelo:
+            QMessageBox.warning(self, "Aviso", "Informe o Modelo da Prova (ex: 1, 2, A, B).")
             return
 
         partes = self.get_effective_partes()
-        existing_p_gabs = self.gabaritos_por_parte.get(tipo, {})
-        dlg = GabaritoMultiPartDialog(tipo, partes, self, existing_p_gabs)
+        existing_p_gabs = self.gabaritos_por_parte.get(modelo, {})
+        existing_unified = self.gabaritos_map.get(modelo, "")
+
+        dlg = GabaritoTableDialog(modelo, partes, self.mapped_subjects, self, existing_p_gabs, existing_unified)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             p_dict, unified_str = dlg.get_data()
-            self.gabaritos_por_parte[tipo] = p_dict
-            self.gabaritos_map[tipo] = unified_str
-            self.txt_tipo.clear()
+            self.gabaritos_por_parte[modelo] = p_dict
+            self.gabaritos_map[modelo] = unified_str
+            self.txt_modelo.clear()
             self.refresh_gabaritos_table()
 
-    def remove_gabarito(self, tipo: str):
-        if tipo in self.gabaritos_map:
-            del self.gabaritos_map[tipo]
-        if tipo in self.gabaritos_por_parte:
-            del self.gabaritos_por_parte[tipo]
+    def edit_gabarito_model(self, modelo: str):
+        self.txt_modelo.setText(modelo)
+        self.add_gabarito()
+
+    def remove_gabarito(self, modelo: str):
+        if modelo in self.gabaritos_map:
+            del self.gabaritos_map[modelo]
+        if modelo in self.gabaritos_por_parte:
+            del self.gabaritos_por_parte[modelo]
         self.refresh_gabaritos_table()
 
     def refresh_gabaritos_table(self):
         self.tbl_gabaritos.setRowCount(len(self.gabaritos_map))
-        for row_idx, (tipo, gab) in enumerate(self.gabaritos_map.items()):
-            self.tbl_gabaritos.setItem(row_idx, 0, QTableWidgetItem(tipo))
-            self.tbl_gabaritos.setItem(row_idx, 1, QTableWidgetItem(f"{gab} ({len(gab)} Qs)"))
+        for row_idx, (mod, gab) in enumerate(self.gabaritos_map.items()):
+            self.tbl_gabaritos.setItem(row_idx, 0, QTableWidgetItem(mod))
+
+            annulled_cnt = gab.count("*") + gab.count("X")
+            info_str = f"{gab} ({len(gab)} Qs)"
+            if annulled_cnt > 0:
+                info_str += f" — ⚠️ {annulled_cnt} Anulada(s)"
+
+            self.tbl_gabaritos.setItem(row_idx, 1, QTableWidgetItem(info_str))
+
+            w_actions = QWidget()
+            h_act = QHBoxLayout(w_actions)
+            h_act.setContentsMargins(2, 2, 2, 2)
+            h_act.setSpacing(4)
+
+            btn_edit = QPushButton("Editar Tabela")
+            btn_edit.setIcon(qta.icon('fa5s.table', color='#242D64'))
+            btn_edit.setObjectName("btnSecondary")
+            btn_edit.clicked.connect(lambda _, m=mod: self.edit_gabarito_model(m))
 
             btn_del = QPushButton("Remover")
             btn_del.setIcon(qta.icon('fa5s.trash-alt', color='white'))
             btn_del.setObjectName("btnDanger")
-            btn_del.clicked.connect(lambda _, t=tipo: self.remove_gabarito(t))
-            self.tbl_gabaritos.setCellWidget(row_idx, 2, btn_del)
+            btn_del.clicked.connect(lambda _, m=mod: self.remove_gabarito(m))
+
+            h_act.addWidget(btn_edit)
+            h_act.addWidget(btn_del)
+            self.tbl_gabaritos.setCellWidget(row_idx, 2, w_actions)
 
     def add_subject_mapping(self):
         if not self.gabaritos_map:
-            QMessageBox.warning(self, "Aviso", "Cadastre ao menos um tipo de gabarito antes de mapear disciplinas.")
+            QMessageBox.warning(self, "Aviso", "Cadastre ao menos um modelo de gabarito antes de mapear disciplinas.")
             return
 
-        available_types = list(self.gabaritos_map.keys())
+        available_models = list(self.gabaritos_map.keys())
         num_q = len(next(iter(self.gabaritos_map.values())))
         all_subjects = self.subject_model.list_subjects()
         if not all_subjects:
@@ -569,7 +808,7 @@ class ExamFormDialog(QDialog):
             return
 
         partes = self.get_effective_partes()
-        dlg = SubjectRangeDialog(available_types, all_subjects, num_q, partes, self)
+        dlg = SubjectRangeDialog(available_models, all_subjects, num_q, partes, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             data = dlg.get_data()
             self.mapped_subjects.append(data)
@@ -584,14 +823,18 @@ class ExamFormDialog(QDialog):
     def refresh_mapped_subjects_list(self):
         self.list_map.clear()
         for idx, m in enumerate(self.mapped_subjects):
-            tipo_label = f"Tipo {m.get('tipo')}" if m.get('tipo') else "Todos"
-            text = f"• [{tipo_label}] {m['nome']}: Questão {m['start_q']} até Questão {m['end_q']}"
+            mod_val = m.get('modelo') or m.get('tipo')
+            mod_label = f"Modelo {mod_val}" if mod_val else "Todos"
+            peso_val = m.get('peso', 1.0)
+            text = f"• [{mod_label}] {m['nome']}: Questão {m['start_q']} a {m['end_q']} (Peso: {peso_val})"
             item = QListWidgetItem(text)
             self.list_map.addItem(item)
 
     def validate_and_save(self):
         nome = self.txt_nome.text().strip()
         data = self.txt_data.date().toString("yyyy-MM-dd")
+        tipo_prova = self.combo_tipo_prova.currentText()
+        trimestre = self.combo_trimestre.currentText()
         valor_total = self.spin_valor.value()
         possui_redacao = self.rb_redacao_sim.isChecked()
         bloco_ids = [b["id"] for b in self.selected_blocos]
@@ -601,7 +844,7 @@ class ExamFormDialog(QDialog):
             return
 
         if not self.gabaritos_map:
-            QMessageBox.warning(self, "Gabarito Obrigatório", "A prova precisa ter ao menos um tipo de gabarito cadastrado.")
+            QMessageBox.warning(self, "Gabarito Obrigatório", "A prova precisa ter ao menos um modelo de gabarito cadastrado.")
             return
 
         partes = self.get_effective_partes()
@@ -611,16 +854,27 @@ class ExamFormDialog(QDialog):
             "subjects": self.mapped_subjects
         }
 
+        has_annulled = any("*" in g or "X" in g for g in self.gabaritos_map.values())
+
         try:
             if self.exam_data:
                 self.exam_model.update_exam(
                     self.exam_data["id"], nome, data, self.gabaritos_map,
-                    bloco_ids=bloco_ids, valor_total=valor_total, possui_redacao=possui_redacao, layout_config=layout_config
+                    bloco_ids=bloco_ids, valor_total=valor_total, possui_redacao=possui_redacao,
+                    tipo_prova=tipo_prova, trimestre=trimestre, layout_config=layout_config
                 )
             else:
                 self.exam_model.create_exam(
                     nome, data, self.gabaritos_map,
-                    bloco_ids=bloco_ids, valor_total=valor_total, possui_redacao=possui_redacao, layout_config=layout_config
+                    bloco_ids=bloco_ids, valor_total=valor_total, possui_redacao=possui_redacao,
+                    tipo_prova=tipo_prova, trimestre=trimestre, layout_config=layout_config
+                )
+            if has_annulled:
+                QMessageBox.information(
+                    self,
+                    "Reprocessamento Necessário",
+                    "A prova contém questões **anuladas** (*).\n\n"
+                    "Para que a redistribuição dos pesos e novos boletins sejam aplicados às notas dos alunos, vá para a aba **Processamento de Provas** e execute o reprocessamento."
                 )
             self.accept()
         except Exception as e:
@@ -640,6 +894,8 @@ class ExamsTab(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
 
         # Header Bar
         h_bar = QHBoxLayout()
@@ -656,20 +912,24 @@ class ExamsTab(QWidget):
         l_hist = QVBoxLayout(gb_history)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(8)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Data", "Nome da Prova", "Bloco(s)", "Tipos de Gabarito", "Redação", "Total Alunos", "Ações"
+            "ID", "Data", "Trimestre", "Tipo de Prova", "Nome da Prova", "Bloco(s)", "Modelos de Gabarito", "Redação", "Total Alunos", "Ações"
         ])
         self.table.verticalHeader().setDefaultSectionSize(44)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(7, 440)
+        self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(9, 440)
 
         l_hist.addWidget(self.table)
         layout.addWidget(gb_history)
@@ -683,7 +943,10 @@ class ExamsTab(QWidget):
         for row_idx, e in enumerate(exams):
             self.table.setItem(row_idx, 0, QTableWidgetItem(str(e["id"])))
             self.table.setItem(row_idx, 1, QTableWidgetItem(str(e["data"])))
-            self.table.setItem(row_idx, 2, QTableWidgetItem(str(e["nome"])))
+            self.table.setItem(row_idx, 2, QTableWidgetItem(str(e.get("trimestre", "1º Trimestre"))))
+            self.table.setItem(row_idx, 3, QTableWidgetItem(str(e.get("tipo_prova", "Prova Regular"))))
+            self.table.setItem(row_idx, 4, QTableWidgetItem(str(e["nome"])))
+            
             full_b_name = str(e.get("bloco_nome") or "-")
             if full_b_name and full_b_name != "-":
                 b_parts = [p.strip() for p in full_b_name.split(",") if p.strip()]
@@ -693,17 +956,17 @@ class ExamsTab(QWidget):
 
             item_bloco = QTableWidgetItem(siglas_str)
             item_bloco.setToolTip(f"Bloco(s): {full_b_name}")
-            self.table.setItem(row_idx, 3, item_bloco)
+            self.table.setItem(row_idx, 5, item_bloco)
             
-            tipos_str = ", ".join(e.get("gabaritos", {}).keys())
-            self.table.setItem(row_idx, 4, QTableWidgetItem(tipos_str))
+            modelos_str = ", ".join(e.get("gabaritos", {}).keys())
+            self.table.setItem(row_idx, 6, QTableWidgetItem(modelos_str))
 
             redacao_str = "Sim" if e.get("possui_redacao") else "Não"
             item_red = QTableWidgetItem(redacao_str)
             item_red.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row_idx, 5, item_red)
+            self.table.setItem(row_idx, 7, item_red)
 
-            self.table.setItem(row_idx, 6, QTableWidgetItem(str(e.get("total_processados", 0))))
+            self.table.setItem(row_idx, 8, QTableWidgetItem(str(e.get("total_processados", 0))))
 
             btn_panel = QWidget()
             btn_layout = QHBoxLayout(btn_panel)
@@ -739,7 +1002,7 @@ class ExamsTab(QWidget):
             btn_layout.addWidget(btn_edit)
             btn_layout.addWidget(btn_del)
 
-            self.table.setCellWidget(row_idx, 7, btn_panel)
+            self.table.setCellWidget(row_idx, 9, btn_panel)
 
     def new_exam(self):
         dlg = ExamFormDialog(self.exam_model, self.subject_model, self)
@@ -748,7 +1011,6 @@ class ExamsTab(QWidget):
             self.load_exams()
 
     def edit_exam(self, exam_data):
-        # Buscar dados completos incluindo blocos_list
         full_exam = self.exam_model.get_exam_by_id(exam_data["id"])
         dlg = ExamFormDialog(self.exam_model, self.subject_model, self, exam_data=full_exam)
         if dlg.exec() == QDialog.DialogCode.Accepted:

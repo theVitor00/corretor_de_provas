@@ -77,6 +77,8 @@ class Database:
                     bloco_id INTEGER NULL,
                     valor_total REAL DEFAULT 10.0,
                     possui_redacao INTEGER DEFAULT 0,
+                    tipo_prova TEXT NOT NULL DEFAULT 'Prova Regular',
+                    trimestre TEXT NOT NULL DEFAULT '1º Trimestre',
                     layout_config TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (bloco_id) REFERENCES blocos(id) ON DELETE SET NULL
@@ -95,15 +97,15 @@ class Database:
                 );
             """)
 
-            # Tabela de Gabaritos por Tipo de Prova
+            # Tabela de Gabaritos por Modelo de Prova (antigo Tipo)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS prova_gabaritos (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     prova_id INTEGER NOT NULL,
-                    tipo TEXT NOT NULL,
+                    modelo TEXT NOT NULL,
                     respostas TEXT NOT NULL,
                     FOREIGN KEY (prova_id) REFERENCES provas(id) ON DELETE CASCADE,
-                    UNIQUE(prova_id, tipo)
+                    UNIQUE(prova_id, modelo)
                 );
             """)
 
@@ -114,7 +116,7 @@ class Database:
                     prova_id INTEGER NOT NULL,
                     aluno_matricula TEXT NOT NULL,
                     aluno_id INTEGER NULL,
-                    tipo_prova TEXT NOT NULL,
+                    modelo_prova TEXT NOT NULL,
                     respostas_aluno TEXT NOT NULL,
                     status_controle TEXT DEFAULT 'OK',
                     nota_final REAL DEFAULT 0.0,
@@ -126,6 +128,28 @@ class Database:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (prova_id) REFERENCES provas(id) ON DELETE CASCADE,
                     FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE SET NULL
+                );
+            """)
+
+            # Tabela de Histórico de Notas por Aluno (Boletim)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS historico_notas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    aluno_matricula TEXT NOT NULL,
+                    aluno_id INTEGER NULL,
+                    prova_id INTEGER NOT NULL,
+                    trimestre TEXT NOT NULL,
+                    tipo_prova TEXT NOT NULL,
+                    modelo_prova TEXT NOT NULL,
+                    disciplina TEXT NOT NULL,
+                    data_prova TEXT NOT NULL,
+                    acertos INTEGER DEFAULT 0,
+                    total_questoes INTEGER DEFAULT 0,
+                    nota REAL DEFAULT 0.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (prova_id) REFERENCES provas(id) ON DELETE CASCADE,
+                    FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE SET NULL,
+                    UNIQUE(aluno_matricula, prova_id, disciplina)
                 );
             """)
 
@@ -153,11 +177,28 @@ class Database:
             cols_provas = [row["name"] for row in cur.fetchall()]
             if "possui_redacao" not in cols_provas:
                 cur.execute("ALTER TABLE provas ADD COLUMN possui_redacao INTEGER DEFAULT 0;")
+            if "tipo_prova" not in cols_provas:
+                cur.execute("ALTER TABLE provas ADD COLUMN tipo_prova TEXT NOT NULL DEFAULT 'Prova Regular';")
+            if "trimestre" not in cols_provas:
+                cur.execute("ALTER TABLE provas ADD COLUMN trimestre TEXT NOT NULL DEFAULT '1º Trimestre';")
+
+            cur.execute("PRAGMA table_info(prova_gabaritos);")
+            cols_gabs = [row["name"] for row in cur.fetchall()]
+            if "modelo" not in cols_gabs:
+                if "tipo" in cols_gabs:
+                    cur.execute("ALTER TABLE prova_gabaritos RENAME COLUMN tipo TO modelo;")
+                else:
+                    cur.execute("ALTER TABLE prova_gabaritos ADD COLUMN modelo TEXT NOT NULL DEFAULT '1';")
 
             cur.execute("PRAGMA table_info(prova_processamentos);")
             cols_proc = [row["name"] for row in cur.fetchall()]
             if "nota_redacao" not in cols_proc:
                 cur.execute("ALTER TABLE prova_processamentos ADD COLUMN nota_redacao REAL DEFAULT NULL;")
+            if "modelo_prova" not in cols_proc:
+                if "tipo_prova" in cols_proc:
+                    cur.execute("ALTER TABLE prova_processamentos RENAME COLUMN tipo_prova TO modelo_prova;")
+                else:
+                    cur.execute("ALTER TABLE prova_processamentos ADD COLUMN modelo_prova TEXT NOT NULL DEFAULT '1';")
 
             conn.commit()
 

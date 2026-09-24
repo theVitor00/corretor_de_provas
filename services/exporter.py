@@ -119,14 +119,15 @@ class ReportExporter:
         logo_path, watermark = self._get_branding()
         possui_redacao = bool(exam.get("possui_redacao", False))
         
-        is_landscape = (view_mode == "disciplina")
+        tipo_cat = exam.get("tipo_prova", "Prova Regular")
+        is_landscape = (tipo_cat == "Simulado")
         pagesize = landscape(A4) if is_landscape else A4
 
         doc = SimpleDocTemplate(
             output_path,
             pagesize=pagesize,
-            leftMargin=1.2 * cm if is_landscape else 1.0 * cm,
-            rightMargin=1.2 * cm if is_landscape else 1.0 * cm,
+            leftMargin=1.0 * cm,
+            rightMargin=1.0 * cm,
             topMargin=1.6 * cm,
             bottomMargin=1.8 * cm
         )
@@ -137,10 +138,19 @@ class ReportExporter:
             "CustomTitle",
             parent=styles["Title"],
             fontName="Helvetica-Bold",
-            fontSize=14,
-            leading=17,
+            fontSize=13,
+            leading=16,
             textColor=colors.HexColor("#242D64"),
             alignment=0
+        )
+
+        subtitle_heading_style = ParagraphStyle(
+            "CustomSubHeading",
+            parent=styles["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=10,
+            leading=13,
+            textColor=colors.HexColor("#475569")
         )
         
         subtitle_style = ParagraphStyle(
@@ -203,10 +213,23 @@ class ReportExporter:
 
         story = []
 
-        # Título e Subtítulo por Turma
-        mode_label = view_mode.upper()
-        story.append(Paragraph(f"Relatório de Resultados - {exam.get('nome', 'Prova')} (Modo: {mode_label})", title_style))
-        story.append(Paragraph(f"<b>Turma:</b> {turma_subtitle} | Data: {exam.get('data', 'N/A')} | Bloco(s): {exam.get('bloco_nome') or 'Geral'} | Valor Total: {exam.get('valor_total', 10.0)} pts | Alunos Processados: {len(results)}", subtitle_style))
+        # Modelo de Cabeçalho:
+        # ${titulo} - ${data}
+        # Relatório de Prova
+        # ${turma}
+        # ${modo_de_visualizacao} | Alunos processados: ${qtd_alunos}
+        view_mode_labels = {
+            "geral": "Geral (Acertos por Bloco)",
+            "bloco": "Por Bloco (Notas 0 a 10)",
+            "disciplina": "Por Disciplina (Notas 0 a 10)",
+            "disciplina_acertos": "Por Disciplina (Acertos)"
+        }
+        modo_label = view_mode_labels.get(view_mode, view_mode.upper())
+
+        story.append(Paragraph(f"<b>{exam.get('nome', 'Prova')} - {exam.get('data', '')}</b>", title_style))
+        story.append(Paragraph("<b>Relatório de Prova</b>", subtitle_heading_style))
+        story.append(Paragraph(f"<b>Turma:</b> {turma_subtitle}", subtitle_style))
+        story.append(Paragraph(f"<b>{modo_label}</b> &nbsp;|&nbsp; <b>Alunos processados:</b> {len(results)}", subtitle_style))
 
         disc_db_map, exam_blocks = self._get_block_mapping(exam)
         mapped_subjects = exam.get("layout_config", {}).get("subjects", [])
@@ -243,8 +266,14 @@ class ReportExporter:
 
         story.append(Spacer(1, 10))
 
-        mid_siglas = [get_acronym(m) for m in mid_full]
-        num_mid = len(mid_siglas)
+        # Determinar rótulos das colunas do meio (disciplinas/blocos)
+        tipo_cat = exam.get("tipo_prova", "Prova Regular")
+        if view_mode in ["disciplina", "disciplina_acertos"] and tipo_cat == "Prova Regular" and len(mid_full) <= 3:
+            mid_labels = mid_full
+        else:
+            mid_labels = [get_acronym(m) for m in mid_full]
+
+        num_mid = len(mid_labels)
 
         # Montar colunas finais do cabeçalho
         right_headers = []
@@ -264,10 +293,10 @@ class ReportExporter:
             Paragraph("Matrícula", table_header_style),
             Paragraph("Aluno", table_header_style),
             Paragraph("Turma", table_header_style),
-            Paragraph("Tipo", table_header_style),
+            Paragraph("Modelo", table_header_style),
         ]
-        for sig in mid_siglas:
-            row2.append(Paragraph(sig, table_header_style))
+        for lbl in mid_labels:
+            row2.append(Paragraph(lbl, table_header_style))
 
         for rh in right_headers:
             row2.append(Paragraph(rh, table_header_style))
@@ -315,8 +344,12 @@ class ReportExporter:
                         if view_mode == "disciplina_acertos":
                             row.append(Paragraph(str(ac), table_cell_style))
                         else:
-                            n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                            row.append(Paragraph(f"{n_disc:.2f}", table_cell_style))
+                            if tipo_cat == "Prova Regular":
+                                n_disc = d_info.get("nota", round(ac * 1.0, 1))
+                                row.append(Paragraph(f"{n_disc:.1f}", table_cell_style))
+                            else:
+                                n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                                row.append(Paragraph(f"{n_disc:.2f}", table_cell_style))
 
             if view_mode == "geral":
                 row.append(Paragraph(f"{r.get('total_acertos', 0)}/{r.get('total_questoes', 0)}", table_cell_style))
@@ -610,7 +643,8 @@ class ReportExporter:
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Resultados"
-        if view_mode == "disciplina":
+        tipo_cat = exam.get("tipo_prova", "Prova Regular")
+        if tipo_cat == "Simulado":
             ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
         else:
             ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
@@ -620,8 +654,9 @@ class ReportExporter:
         header_fill = PatternFill(start_color="242D64", end_color="242D64", fill_type="solid")
         header_group_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
         header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-        title_font = Font(name="Calibri", size=14, bold=True, color="242D64")
-        subtitle_font = Font(name="Calibri", size=10, italic=True, color="64748B")
+        title_font = Font(name="Calibri", size=13, bold=True, color="242D64")
+        subheading_font = Font(name="Calibri", size=11, bold=True, color="475569")
+        subtitle_font = Font(name="Calibri", size=10, color="64748B")
         center_align = Alignment(horizontal="center", vertical="center")
         left_align = Alignment(horizontal="left", vertical="center")
         thin_border = Border(
@@ -629,10 +664,22 @@ class ReportExporter:
             top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1')
         )
 
-        ws.append([f"Relatório de Prova: {exam.get('nome', '')} (Modo: {view_mode.upper()})"])
+        view_mode_labels = {
+            "geral": "Geral (Acertos por Bloco)",
+            "bloco": "Por Bloco (Notas 0 a 10)",
+            "disciplina": "Por Disciplina (Notas 0 a 10)",
+            "disciplina_acertos": "Por Disciplina (Acertos)"
+        }
+        modo_label = view_mode_labels.get(view_mode, view_mode.upper())
+
+        ws.append([f"{exam.get('nome', '')} - {exam.get('data', '')}"])
         ws.cell(row=1, column=1).font = title_font
-        ws.append([f"Turma: {turma_subtitle} | Data: {exam.get('data', '')} | Bloco(s): {exam.get('bloco_nome', 'Geral')} | Total Alunos Processados: {len(results)} | Valor Total Prova: {exam.get('valor_total', 10.0)}"])
-        ws.cell(row=2, column=1).font = subtitle_font
+        ws.append(["Relatório de Prova"])
+        ws.cell(row=2, column=1).font = subheading_font
+        ws.append([f"Turma: {turma_subtitle}"])
+        ws.cell(row=3, column=1).font = subtitle_font
+        ws.append([f"{modo_label} | Alunos processados: {len(results)}"])
+        ws.cell(row=4, column=1).font = subtitle_font
 
         disc_db_map, exam_blocks = self._get_block_mapping(exam)
         mapped_subjects = exam.get("layout_config", {}).get("subjects", [])
@@ -659,9 +706,13 @@ class ReportExporter:
             mid_full = exam_disc_list
             group_title = "Acertos" if view_mode == "disciplina_acertos" else "Notas"
 
-        mid_siglas = [get_acronym(m) for m in mid_full]
+        tipo_cat = exam.get("tipo_prova", "Prova Regular")
+        if view_mode in ["disciplina", "disciplina_acertos"] and tipo_cat == "Prova Regular" and len(mid_full) <= 3:
+            mid_labels = mid_full
+        else:
+            mid_labels = [get_acronym(m) for m in mid_full]
 
-        base_left = ["", "Matrícula", "Aluno", "Turma", "Tipo Prova"]
+        base_left = ["", "Matrícula", "Aluno", "Turma", "Modelo"]
         base_right = []
         if view_mode == "geral":
             base_right.append("Total Acertos")
@@ -674,7 +725,7 @@ class ReportExporter:
         if possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]:
             base_right.append("Nota Final")
 
-        headers_l5 = base_left + mid_siglas + base_right
+        headers_l5 = base_left + mid_labels + base_right
         total_cols_cnt = len(headers_l5)
 
         # Legenda antes da tabela mesclada na largura da tabela
@@ -763,8 +814,12 @@ class ReportExporter:
                             d_info = {}
                         tot = d_info.get("total", 0)
                         ac = d_info.get("acertos", 0)
-                        n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                        row_data.append(round(n_disc, 2))
+                        if tipo_cat == "Prova Regular":
+                            n_disc = d_info.get("nota", round(ac * 1.0, 1))
+                            row_data.append(round(n_disc, 1))
+                        else:
+                            n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                            row_data.append(round(n_disc, 2))
 
             if possui_redacao:
                 n_red = r.get("nota_redacao")
@@ -809,7 +864,8 @@ class ReportExporter:
     ):
         doc = docx.Document()
         section = doc.sections[0]
-        if view_mode == "disciplina":
+        tipo_cat = exam.get("tipo_prova", "Prova Regular")
+        if tipo_cat == "Simulado":
             section.orientation = WD_ORIENT.LANDSCAPE
             new_w, new_h = section.page_height, section.page_width
             section.page_width = new_w
@@ -819,14 +875,26 @@ class ReportExporter:
 
         possui_redacao = bool(exam.get("possui_redacao", False))
 
+        view_mode_labels = {
+            "geral": "Geral (Acertos por Bloco)",
+            "bloco": "Por Bloco (Notas 0 a 10)",
+            "disciplina": "Por Disciplina (Notas 0 a 10)",
+            "disciplina_acertos": "Por Disciplina (Acertos)"
+        }
+        modo_label = view_mode_labels.get(view_mode, view_mode.upper())
+
         h1 = doc.add_heading(level=1)
-        run = h1.add_run(f"Relatório de Prova: {exam.get('nome', '')} (Modo: {view_mode.upper()})")
+        run = h1.add_run(f"{exam.get('nome', '')} - {exam.get('data', '')}")
         run.font.color.rgb = RGBColor(0x24, 0x2D, 0x64)
 
-        p = doc.add_paragraph()
-        p.add_run(f"Turma: {turma_subtitle}\n")
-        p.add_run(f"Data: {exam.get('data', '')} | Bloco(s): {exam.get('bloco_nome') or 'Geral'} | Valor Total Prova: {exam.get('valor_total', 10.0)} pts\n")
-        p.add_run(f"Total de Alunos Processados: {len(results)}")
+        p2 = doc.add_paragraph()
+        r2 = p2.add_run("Relatório de Prova")
+        r2.bold = True
+        r2.font.color.rgb = RGBColor(0x47, 0x55, 0x69)
+
+        p3 = doc.add_paragraph()
+        p3.add_run(f"Turma: {turma_subtitle}\n")
+        p3.add_run(f"{modo_label} | Alunos processados: {len(results)}")
 
         disc_db_map, exam_blocks = self._get_block_mapping(exam)
         mapped_subjects = exam.get("layout_config", {}).get("subjects", [])
@@ -862,7 +930,11 @@ class ReportExporter:
 
         doc.add_paragraph().paragraph_format.space_after = Pt(10)
 
-        mid_siglas = [get_acronym(m) for m in mid_full]
+        tipo_cat = exam.get("tipo_prova", "Prova Regular")
+        if view_mode in ["disciplina", "disciplina_acertos"] and tipo_cat == "Prova Regular" and len(mid_full) <= 3:
+            mid_labels = mid_full
+        else:
+            mid_labels = [get_acronym(m) for m in mid_full]
 
         right_headers = []
         if view_mode == "geral":
@@ -876,7 +948,7 @@ class ReportExporter:
         if possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]:
             right_headers.append("Nota Final")
 
-        headers = ["", "Matrícula", "Aluno", "Turma", "Tipo"] + mid_siglas + right_headers
+        headers = ["", "Matrícula", "Aluno", "Turma", "Modelo"] + mid_labels + right_headers
 
         table = doc.add_table(rows=1, cols=len(headers))
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -949,8 +1021,12 @@ class ReportExporter:
                             d_info = {}
                         tot = d_info.get("total", 0)
                         ac = d_info.get("acertos", 0)
-                        n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
-                        row_cells[col_idx].text = f"{n_disc:.2f}"
+                        if tipo_cat == "Prova Regular":
+                            n_disc = d_info.get("nota", round(ac * 1.0, 1))
+                            row_cells[col_idx].text = f"{n_disc:.1f}"
+                        else:
+                            n_disc = (ac / tot * 10.0) if tot > 0 else d_info.get("nota", 0.0)
+                            row_cells[col_idx].text = f"{n_disc:.2f}"
                     col_idx += 1
 
             if possui_redacao:

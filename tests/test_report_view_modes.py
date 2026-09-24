@@ -148,3 +148,65 @@ def test_export_and_ui_data_integrity(qapp, test_db, tmp_path):
         docx_path = str(tmp_path / f"test_integ_{mode}.docx")
         exporter.export_exam_word(exam, results, docx_path, view_mode=mode)
         assert os.path.exists(docx_path) and os.path.getsize(docx_path) > 0
+
+
+def test_prova_regular_acertos_vs_notas(qapp, test_db):
+    exam_model = ExamModel(test_db)
+    student_model = StudentModel(test_db)
+    proc_model = ProcessingModel(test_db)
+    subject_model = SubjectBlockModel(test_db)
+
+    layout_config = {
+        "partes": [{"parte_num": 1, "nome": "Parte Única", "num_questoes": 10, "q_start": 1, "q_end": 10}],
+        "subjects": [
+            {"tipo": "1", "nome": "Matemática", "start_q": 1, "end_q": 10, "peso": 0.5},
+        ]
+    }
+    exam_id = exam_model.create_exam(
+        nome="Prova Regular Peso Teste",
+        data="2026-09-24",
+        gabaritos={"1": "A" * 10},
+        valor_total=5.0,
+        tipo_prova="Prova Regular",
+        layout_config=layout_config
+    )
+    exam = exam_model.get_exam_by_id(exam_id)
+
+    detalhes = {
+        "Matemática": {"acertos": 8, "total": 10, "soma_pesos_acertos": 4.0, "soma_pesos_totais": 5.0, "nota": 4.0}
+    }
+    proc_model.save_processing(
+        prova_id=exam_id,
+        aluno_matricula="301",
+        tipo_prova="1",
+        respostas_aluno="A" * 8 + "B" * 2,
+        status_controle="OK",
+        nota_final=4.0,
+        percentual_acertos=80.0,
+        total_acertos=8,
+        total_questoes=10,
+        detalhes_disciplinas=detalhes
+    )
+
+    tab = ReportsTab()
+    tab.exam_model = exam_model
+    tab.student_model = student_model
+    tab.processing_model = proc_model
+    tab.subject_model = subject_model
+
+    tab.select_exam(exam_id)
+
+    # 1. Visualização por Disciplina (Notas) -> Exibe acertos * peso = 4.0
+    idx_notas = tab.combo_view_mode.findData("disciplina")
+    tab.combo_view_mode.setCurrentIndex(idx_notas)
+    tab.load_results()
+    mat_item_notas = tab.tbl_results.item(0, 5) # Coluna 5 = Matemática
+    assert mat_item_notas is not None and mat_item_notas.text() == "4.0"
+
+    # 2. Visualização por Disciplina (Acertos) -> Exibe somente acertos = 8
+    idx_acertos = tab.combo_view_mode.findData("disciplina_acertos")
+    tab.combo_view_mode.setCurrentIndex(idx_acertos)
+    tab.load_results()
+    mat_item_acertos = tab.tbl_results.item(0, 5)
+    assert mat_item_acertos is not None and mat_item_acertos.text() == "8"
+

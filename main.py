@@ -9,7 +9,7 @@ def main():
     apply_theme(app)
 
     window = MainWindow()
-    window.show()
+    window.showMaximized()
 
     sys.exit(app.exec())
 
