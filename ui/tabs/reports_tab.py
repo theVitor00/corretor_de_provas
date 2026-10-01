@@ -767,7 +767,7 @@ class ReportsTab(QWidget):
                 img = QImage(logo_path)
                 if not img.isNull():
                     doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl("logo://brand"), img)
-                    logo_img_tag = '<img src="logo://brand" class="logo-img">'
+                    logo_img_tag = '<img src="logo://brand" class="logo-img" align="right" style="max-height: 48px; max-width: 180px; float: right;">'
 
             html = f"""
             <html>
@@ -777,8 +777,8 @@ class ReportsTab(QWidget):
                 body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; color: #1E293B; }}
                 .header-table {{ width: 100%; border-collapse: collapse; margin: 0 0 6px 0; border: none; }}
                 .header-td-left {{ border: none !important; text-align: left; vertical-align: middle; padding: 0 !important; }}
-                .header-td-right {{ border: none !important; text-align: right; vertical-align: middle; padding: 0 !important; }}
-                .logo-img {{ max-height: 48px; max-width: 180px; display: inline-block; }}
+                .header-td-right {{ border: none !important; text-align: right; vertical-align: middle; padding: 0 !important; width: 190px; }}
+                .logo-img {{ max-height: 48px; max-width: 180px; display: block; float: right; margin-left: auto; margin-right: 0; }}
                 h2 {{ color: #242D64; margin-bottom: 2px; margin-top: 0; font-size: 14pt; }}
                 h3 {{ color: #475569; margin-top: 2px; margin-bottom: 4px; font-size: 11pt; font-weight: bold; }}
                 p {{ font-size: 9pt; color: #475569; margin: 2px 0; }}
@@ -798,16 +798,18 @@ class ReportsTab(QWidget):
 
             if logo_img_tag:
                 html += f"""
-                <table class="header-table">
+                <table class="header-table" width="100%" border="0" style="width: 100%; border-collapse: collapse; margin-bottom: 6px;">
                     <tr>
-                        <td class="header-td-left">
+                        <td class="header-td-left" align="left" valign="middle" style="border: none !important; text-align: left; vertical-align: middle;">
                             <h2>{self.current_exam['nome']} - {self.current_exam['data']}</h2>
                             <h3>Relatório de Prova</h3>
                             <p><b>Turma:</b> {turma_sub}</p>
                             <p><b>{modo_label}</b> &nbsp;|&nbsp; <b>Alunos processados:</b> {len(self.current_results)}</p>
                         </td>
-                        <td class="header-td-right">
-                            {logo_img_tag}
+                        <td class="header-td-right" align="right" valign="middle" style="border: none !important; text-align: right; vertical-align: middle; width: 190px;">
+                            <div align="right" style="text-align: right; width: 100%;">
+                                {logo_img_tag}
+                            </div>
                         </td>
                     </tr>
                 </table>

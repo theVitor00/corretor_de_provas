@@ -929,7 +929,7 @@ class ExamsTab(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(9, 440)
+        self.table.setColumnWidth(9, 530)
 
         l_hist.addWidget(self.table)
         layout.addWidget(gb_history)
@@ -985,6 +985,12 @@ class ExamsTab(QWidget):
             btn_res.setMinimumWidth(105)
             btn_res.clicked.connect(lambda _, e_id=e["id"]: self.view_results(e_id))
 
+            btn_clone = QPushButton("Clonar")
+            btn_clone.setIcon(qta.icon('fa5s.clone', color='#242D64'))
+            btn_clone.setObjectName("btnSecondary")
+            btn_clone.setMinimumWidth(85)
+            btn_clone.clicked.connect(lambda _, e_id=e["id"], e_nome=e["nome"]: self.clone_exam(e_id, e_nome))
+
             btn_edit = QPushButton("Editar")
             btn_edit.setIcon(qta.icon('fa5s.edit', color='#242D64'))
             btn_edit.setObjectName("btnSecondary")
@@ -999,6 +1005,7 @@ class ExamsTab(QWidget):
 
             btn_layout.addWidget(btn_proc)
             btn_layout.addWidget(btn_res)
+            btn_layout.addWidget(btn_clone)
             btn_layout.addWidget(btn_edit)
             btn_layout.addWidget(btn_del)
 
@@ -1016,6 +1023,21 @@ class ExamsTab(QWidget):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             QMessageBox.information(self, "Sucesso", "Prova atualizada com sucesso!")
             self.load_exams()
+
+    def clone_exam(self, exam_id: int, exam_nome: str):
+        reply = QMessageBox.question(
+            self, "Confirmar Clonagem",
+            f"Deseja criar um clone da prova '{exam_nome}'?\n\n"
+            f"Uma nova prova chamada '{exam_nome} (CLONE)' será criada com a data de hoje e sem resultados associados.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                new_id = self.exam_model.clone_exam(exam_id)
+                self.load_exams()
+                QMessageBox.information(self, "Sucesso", f"Prova '{exam_nome}' clonada com sucesso!\nNovo ID: {new_id}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erro ao Clonar Prova", str(e))
 
     def delete_exam(self, exam_id: int, exam_nome: str):
         reply = QMessageBox.question(

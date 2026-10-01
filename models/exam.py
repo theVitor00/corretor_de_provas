@@ -1,5 +1,6 @@
 import sqlite3
 import json
+from datetime import date
 from typing import List, Dict, Any, Optional
 from database import Database, db as default_db
 
@@ -222,3 +223,29 @@ class ExamModel:
                 
                 exams.append(exam)
             return exams
+
+    def clone_exam(self, exam_id: int, new_nome: Optional[str] = None, new_date: Optional[str] = None) -> int:
+        """
+        Clona uma prova existente copiando todas as suas configurações
+        (gabaritos, blocos, divisões/partes, mapeamento de disciplinas, tipo, trimestre e valor total).
+        Por padrão, o nome recebe o sufixo ' (CLONE)' e a data é definida para a data atual.
+        Nenhum resultado de processamento é copiado para a prova clonada.
+        """
+        original = self.get_exam_by_id(exam_id)
+        if not original:
+            raise ValueError(f"Prova com ID {exam_id} não encontrada.")
+
+        nome = new_nome.strip() if new_nome else f"{original['nome']} (CLONE)"
+        data_prova = new_date.strip() if new_date else date.today().strftime("%Y-%m-%d")
+
+        return self.create_exam(
+            nome=nome,
+            data=data_prova,
+            gabaritos=original["gabaritos"],
+            bloco_ids=original.get("bloco_ids", []),
+            valor_total=float(original.get("valor_total", 10.0)),
+            possui_redacao=bool(original.get("possui_redacao", False)),
+            tipo_prova=str(original.get("tipo_prova", "Atividade de Rotina")),
+            trimestre=str(original.get("trimestre", "1º Trimestre")),
+            layout_config=original.get("layout_config", {})
+        )

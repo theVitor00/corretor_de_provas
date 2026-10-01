@@ -200,6 +200,22 @@ Nesta fase final de polimento, foram adicionados recursos de apoio à nota de re
 - **Validação com Suíte de Testes**:
   - Criado `tests/test_question_annulment.py` e atualizado `tests/test_report_view_modes.py`. Suíte completa de 31 testes aprovada (`31/31 passed`).
 
+### 3.13 Funcionalidade de Clonar Provas (2026-10-01)
+- **Cópia Integral de Configuração (`ExamModel.clone_exam`)**:
+  - Implementado o método `clone_exam` em `models/exam.py`, permitindo duplicar provas existentes preservando todas as configurações: gabaritos por modelo, blocos vinculados, divisões/partes (etapas/dias), mapeamento posicional de disciplinas (com faixas e pesos), valor total, flag de redação, tipo de prova e trimestre.
+- **Ajustes de Título e Data**:
+  - O título da prova clonada recebe automaticamente o sufixo `' (CLONE)'` (ex: `'Simulado ENEM 2025 (CLONE)'`), podendo ser editado livremente.
+  - A data da prova clonada é redefinida para a data corrente (`YYYY-MM-DD`).
+- **Isolamento de Processamentos**:
+  - A nova prova é criada sem nenhum resultado de processamento ou histórico de notas vinculado (`total_processados = 0`), ficando pronta para receber novos arquivos `.DAT` e correções.
+- **Interface Gráfica (`ui/tabs/exams_tab.py`)**:
+  - Adicionado o botão **Clonar** com ícone `fa5s.clone` na coluna de ações da tabela de provas cadastradas.
+  - Exibido diálogo de confirmação com resumo das alterações aplicadas.
+- **Alinhamento do Logotipo na Impressão Direta A4 (`ui/tabs/reports_tab.py`)**:
+  - Ajustado o cabeçalho HTML da impressão direta para alinhar rigorosamente o logotipo da instituição à extrema direita da página, utilizando célula `<td align="right">`, contêiner `<div align="right">` e atributo `align="right"` na tag `<img>`.
+- **Validação com Testes de Unidade**:
+  - Criado `tests/test_exam_clone.py`. Suíte completa de 34 testes aprovada (`34/34 passed`).
+
 ---
 
 ## 🤖 Orientações para Agentes de IA Futuros
@@ -216,6 +232,6 @@ Ao estender ou modificar esta codebase, mantenha as seguintes premissas:
 
 3. **Validação de Testes**:
    - Toda alteração nas colunas da tabela GUI exige a atualização dos índices verificados em `tests/test_report_view_modes.py`.
-   - Execute sempre `python -m pytest` para validar que todas as suítes permanecem aprovadas (31/31).
+   - Execute sempre `python -m pytest` para validar que todas as suítes permanecem aprovadas (34/34).
 
 
