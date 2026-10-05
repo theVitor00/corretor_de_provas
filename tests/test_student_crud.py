@@ -73,3 +73,44 @@ def test_student_import_json_clean_matricula(test_db, tmp_path):
     assert s3["nome"] == "Ana Lima"
     s4 = model.get_by_matricula("4")
     assert s4["nome"] == "Carlos Souza"
+
+def test_get_student_exam_history_and_performance_stats(test_db):
+    from models.exam import ExamModel
+    from models.processing import ProcessingModel
+    student_model = StudentModel(test_db)
+    exam_model = ExamModel(test_db)
+    processing_model = ProcessingModel(test_db)
+
+    s_id = student_model.create("1001", "Aluno Teste", "1ª Série")
+    exam_id = exam_model.create_exam(
+        nome="Prova de Matemática",
+        data="2026-10-01",
+        gabaritos={"1": "ABCD"},
+        tipo_prova="Prova Regular",
+        trimestre="1º Trimestre"
+    )
+
+    processing_model.save_processing(
+        prova_id=exam_id,
+        aluno_matricula="1001",
+        modelo_prova="1",
+        respostas_aluno="ABCD",
+        status_controle="OK",
+        nota_final=10.0,
+        percentual_acertos=100.0,
+        total_acertos=4,
+        total_questoes=4,
+        detalhes_disciplinas={"Matemática": {"acertos": 4, "total": 4, "nota": 10.0}},
+        aluno_id=s_id
+    )
+
+    history = student_model.get_student_exam_history(s_id)
+    assert len(history) == 1
+    assert history[0]["prova_nome"] == "Prova de Matemática"
+    assert history[0]["nota_final"] == 10.0
+    assert history[0]["status_presenca"] == "Presente"
+
+    stats = student_model.get_student_performance_stats(s_id)
+    assert stats["total_provas"] == 1
+    assert stats["media_geral"] == 10.0
+

@@ -216,6 +216,15 @@ Nesta fase final de polimento, foram adicionados recursos de apoio à nota de re
 - **Validação com Testes de Unidade**:
   - Criado `tests/test_exam_clone.py`. Suíte completa de 34 testes aprovada (`34/34 passed`).
 
+### 3.14 Fix: Correção de Erro de Coluna Inexistente `p.tipo_prova` no Perfil do Aluno (2026-10-05)
+- **Correção da Consulta SQL de Histórico de Provas (`StudentModel.get_student_exam_history`)**:
+  - Ajustada a instrução SQL em `models/student.py` para selecionar a coluna `p.modelo_prova` (e a alias `p.modelo_prova AS tipo_prova` para compatibilidade retroativa) em vez de `p.tipo_prova`, eliminando a exceção `sqlite3.OperationalError: no such column: p.tipo_prova` ao visualizar o perfil do aluno via `StudentDetailDialog`.
+  - Adicionada a projeção da coluna `pr.tipo_prova AS exam_tipo_prova` para identificação da categoria do exame.
+- **Ajustes na Interface da Aba Alunos (`ui/tabs/students_tab.py`)**:
+  - Atualizado o cabeçalho da tabela de histórico no diálogo de Perfil do Aluno (`StudentDetailDialog`) para exibir a nomenclatura padronizada **"Modelo"** utilizando `h.get("modelo_prova") or h.get("tipo_prova")`.
+- **Validação com Testes de Unidade**:
+  - Adicionado o teste `test_get_student_exam_history_and_performance_stats` em `tests/test_student_crud.py`. Suíte completa de 35 testes aprovada (`35/35 passed`).
+
 ---
 
 ## 🤖 Orientações para Agentes de IA Futuros
@@ -232,6 +241,6 @@ Ao estender ou modificar esta codebase, mantenha as seguintes premissas:
 
 3. **Validação de Testes**:
    - Toda alteração nas colunas da tabela GUI exige a atualização dos índices verificados em `tests/test_report_view_modes.py`.
-   - Execute sempre `python -m pytest` para validar que todas as suítes permanecem aprovadas (34/34).
+   - Execute sempre `python -m pytest` para validar que todas as suítes permanecem aprovadas (35/35).
 
 

@@ -152,14 +152,14 @@ class StudentDetailDialog(QDialog):
         l_hist = QVBoxLayout(tab_hist)
         tbl = QTableWidget()
         tbl.setColumnCount(6)
-        tbl.setHorizontalHeaderLabels(["Data", "Prova", "Tipo", "Acertos", "% Acertos", "Nota Final"])
+        tbl.setHorizontalHeaderLabels(["Data", "Prova", "Modelo", "Acertos", "% Acertos", "Nota Final"])
         tbl.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
         tbl.setRowCount(len(history))
         for r, h in enumerate(history):
             tbl.setItem(r, 0, QTableWidgetItem(str(h.get("prova_data"))))
             tbl.setItem(r, 1, QTableWidgetItem(str(h.get("prova_nome"))))
-            tbl.setItem(r, 2, QTableWidgetItem(str(h.get("tipo_prova"))))
+            tbl.setItem(r, 2, QTableWidgetItem(str(h.get("modelo_prova") or h.get("tipo_prova"))))
             tbl.setItem(r, 3, QTableWidgetItem(f"{h.get('total_acertos')}/{h.get('total_questoes')}"))
             tbl.setItem(r, 4, QTableWidgetItem(f"{h.get('percentual_acertos'):.1f}%"))
             tbl.setItem(r, 5, QTableWidgetItem(f"{h.get('nota_final'):.2f}"))

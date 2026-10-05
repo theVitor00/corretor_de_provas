@@ -101,7 +101,9 @@ class StudentModel:
                     pr.nome AS prova_nome,
                     pr.data AS prova_data,
                     pr.valor_total AS prova_valor_total,
-                    p.tipo_prova,
+                    pr.tipo_prova AS exam_tipo_prova,
+                    p.modelo_prova,
+                    p.modelo_prova AS tipo_prova,
                     p.nota_final,
                     p.percentual_acertos,
                     p.total_acertos,
@@ -116,7 +118,7 @@ class StudentModel:
 
             # 2. Buscar todas as provas que tiveram processamento no sistema
             cur.execute("""
-                SELECT DISTINCT pr.id AS prova_id, pr.nome AS prova_nome, pr.data AS prova_data, pr.valor_total AS prova_valor_total
+                SELECT DISTINCT pr.id AS prova_id, pr.nome AS prova_nome, pr.data AS prova_data, pr.valor_total AS prova_valor_total, pr.tipo_prova AS exam_tipo_prova
                 FROM provas pr
                 JOIN prova_processamentos pp ON pp.prova_id = pr.id
             """)
@@ -143,6 +145,8 @@ class StudentModel:
                         "prova_nome": exam["prova_nome"],
                         "prova_data": exam["prova_data"],
                         "prova_valor_total": exam["prova_valor_total"],
+                        "exam_tipo_prova": exam.get("exam_tipo_prova", "Prova Regular"),
+                        "modelo_prova": "Ausente",
                         "tipo_prova": "Ausente",
                         "nota_final": 0.0,
                         "percentual_acertos": 0.0,
