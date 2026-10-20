@@ -273,6 +273,47 @@ class ReportsTab(QWidget):
             "exam_blocks": exam_block_names
         }
 
+    def _update_view_mode_combo_for_exam(self, exam):
+        if not exam:
+            return
+        tipo_cat = exam.get("tipo_prova", "Prova Regular")
+        current_data = self.combo_view_mode.currentData()
+
+        if tipo_cat in ["Simulado Enem", "Simulado ENEM"]:
+            allowed = [
+                ("Por Bloco (Notas)", "bloco"),
+                ("Geral (Acertos por Bloco)", "geral")
+            ]
+        elif tipo_cat == "Prova Regular":
+            allowed = [
+                ("Por Disciplina (Notas 0 a 10)", "disciplina"),
+                ("Por Disciplina (Acertos)", "disciplina_acertos")
+            ]
+        elif tipo_cat == "Prova de Seleção":
+            allowed = [
+                ("Por Disciplina (Acertos)", "disciplina_acertos")
+            ]
+        else:
+            allowed = [
+                ("Geral (Acertos por Bloco)", "geral"),
+                ("Por Bloco (Notas 0 a 10)", "bloco"),
+                ("Por Disciplina (Notas 0 a 10)", "disciplina"),
+                ("Por Disciplina (Acertos)", "disciplina_acertos")
+            ]
+
+        current_items = [(self.combo_view_mode.itemText(i), self.combo_view_mode.itemData(i)) for i in range(self.combo_view_mode.count())]
+        if current_items != allowed:
+            self.combo_view_mode.blockSignals(True)
+            self.combo_view_mode.clear()
+            for text, val in allowed:
+                self.combo_view_mode.addItem(text, val)
+            idx = self.combo_view_mode.findData(current_data)
+            if idx >= 0:
+                self.combo_view_mode.setCurrentIndex(idx)
+            else:
+                self.combo_view_mode.setCurrentIndex(0)
+            self.combo_view_mode.blockSignals(False)
+
     def get_effective_view_mode(self) -> str:
         if not self.current_exam:
             return self.combo_view_mode.currentData() or "geral"
@@ -289,6 +330,9 @@ class ReportsTab(QWidget):
                 view_mode = "disciplina"
         elif tipo_prova_cat == "Prova de Seleção":
             view_mode = "disciplina_acertos"
+        elif tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+            if view_mode not in ["geral", "bloco"]:
+                view_mode = "bloco"
 
         return view_mode
 
@@ -305,6 +349,7 @@ class ReportsTab(QWidget):
         self.current_exam = self.exam_model.get_exam_by_id(exam_id)
         possui_redacao = bool(self.current_exam.get("possui_redacao", False))
         tipo_prova_cat = self.current_exam.get("tipo_prova", "Prova Regular")
+        self._update_view_mode_combo_for_exam(self.current_exam)
 
         turma_val = self.combo_turma.currentData()
         sort_val = self.combo_sort.currentData()
@@ -316,6 +361,8 @@ class ReportsTab(QWidget):
         )
 
         def get_final_score(r):
+            if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+                return float(r.get("nota_final", 0.0))
             n_red = (r.get("nota_redacao") or 0.0) if possui_redacao else 0.0
             if view_mode in ["geral", "disciplina_acertos"]:
                 return float(r.get("total_acertos", 0)) + float(n_red)
@@ -359,16 +406,26 @@ class ReportsTab(QWidget):
         mid_headers_labels = []
         
         if view_mode in ["geral", "bloco"]:
-            block_set = set()
-            if exam_blocks:
-                for b in exam_blocks:
-                    block_set.add(b)
+            if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+                ordered_blocks = []
+                for s in mapped_subjects:
+                    n = s.get("nome", "").strip()
+                    if n and n not in ordered_blocks:
+                        ordered_blocks.append(n)
+                if not ordered_blocks and exam_blocks:
+                    ordered_blocks = list(exam_blocks)
+                mid_headers_full = ordered_blocks
             else:
-                for d in exam_disc_list:
-                    b_name = disc_db_map.get(d.lower()) or "Geral"
-                    block_set.add(b_name)
-            
-            mid_headers_full = sorted(list(block_set))
+                block_set = set()
+                if exam_blocks:
+                    for b in exam_blocks:
+                        block_set.add(b)
+                else:
+                    for d in exam_disc_list:
+                        b_name = disc_db_map.get(d.lower()) or "Geral"
+                        block_set.add(b_name)
+                mid_headers_full = sorted(list(block_set))
+
             mid_headers_labels = [get_acronym(b) for b in mid_headers_full]
             group_title = "Acertos" if view_mode == "geral" else "Notas"
         else: # view_mode in ["disciplina", "disciplina_acertos"]
@@ -422,14 +479,18 @@ class ReportsTab(QWidget):
 
             if start_data_col <= col_idx < start_data_col + num_mid:
                 full_n = mid_headers_full[col_idx - start_data_col]
-                tt = get_header_tooltip(full_n, mode=view_mode)
+                is_enem = (tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"])
+                tt = get_header_tooltip(full_n, mode=view_mode, is_enem=is_enem)
                 item.setToolTip(tt)
             elif label == "Total":
                 item.setToolTip("Total de questões acertadas na prova inteira")
             elif label in ["Redação", "RED"]:
                 item.setToolTip("Nota de redação inserida manualmente ou via CSV")
             elif label == "Nota Final":
-                item.setToolTip("Nota final do aluno (Total + Redação se houver)")
+                if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+                    item.setToolTip("Média dos blocos (desconsiderando a Redação)")
+                else:
+                    item.setToolTip("Nota final do aluno (Total + Redação se houver)")
 
         # Configuração responsiva de largura das colunas
         font_metrics = self.tbl_results.fontMetrics()
@@ -484,7 +545,7 @@ class ReportsTab(QWidget):
                         if d_k.strip().lower() == "geral":
                             continue
                         d_b = disc_db_map.get(d_k.strip().lower()) or "Geral"
-                        if d_b == item_name or (len(mid_headers_full) == 1):
+                        if d_b == item_name or d_k.strip().lower() == item_name.strip().lower() or (len(mid_headers_full) == 1):
                             b_acertos += d_v.get("acertos", 0)
 
                     item = QTableWidgetItem(str(b_acertos))
@@ -498,12 +559,18 @@ class ReportsTab(QWidget):
                         if d_k.strip().lower() == "geral":
                             continue
                         d_b = disc_db_map.get(d_k.strip().lower()) or "Geral"
-                        if d_b == item_name or (len(mid_headers_full) == 1):
+                        if d_b == item_name or d_k.strip().lower() == item_name.strip().lower() or (len(mid_headers_full) == 1):
                             b_acertos += d_v.get("acertos", 0)
                             b_total_q += d_v.get("total", 0)
 
-                    b_nota = (b_acertos / b_total_q * 10.0) if b_total_q > 0 else 0.0
-                    item = QTableWidgetItem(f"{b_nota:.2f}")
+                    if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+                        num_q = b_total_q if b_total_q > 0 else 45
+                        b_nota = int(round((1000.0 / num_q) * b_acertos))
+                        item = QTableWidgetItem(str(b_nota))
+                    else:
+                        b_nota = (b_acertos / b_total_q * 10.0) if b_total_q > 0 else 0.0
+                        item = QTableWidgetItem(f"{b_nota:.2f}")
+
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     self.tbl_results.setItem(row_idx, target_col, item)
 
@@ -542,7 +609,9 @@ class ReportsTab(QWidget):
 
             # Coluna Total (em Geral e Disciplina Acertos)
             if view_mode in ["geral", "disciplina_acertos"]:
-                if view_mode == "geral":
+                if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+                    tot_str = str(r['total_acertos'])
+                elif view_mode == "geral":
                     tot_str = f"{r['total_acertos']}/{r['total_questoes']}"
                 else:
                     tot_str = str(r['total_acertos'])
@@ -554,7 +623,10 @@ class ReportsTab(QWidget):
             # Coluna Redação
             if possui_redacao:
                 n_red = r.get("nota_redacao")
-                n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
+                if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+                    n_red_str = str(int(round(n_red))) if n_red is not None else "0"
+                else:
+                    n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
                 red_item = QTableWidgetItem(n_red_str)
                 red_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.tbl_results.setItem(row_idx, curr_c, red_item)
@@ -562,13 +634,16 @@ class ReportsTab(QWidget):
 
             # Coluna Nota Final
             if (possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]):
-                n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
-                if view_mode == "geral":
-                    fn_val = float(r.get("total_acertos", 0)) + n_red_val
+                if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+                    fn_val = float(r.get("nota_final", 0.0))
+                    fn_item = QTableWidgetItem(str(int(round(fn_val))))
                 else:
-                    fn_val = float(r.get("nota_final", 0.0)) + n_red_val
-
-                fn_item = QTableWidgetItem(f"{fn_val:.2f}")
+                    n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
+                    if view_mode == "geral":
+                        fn_val = float(r.get("total_acertos", 0)) + n_red_val
+                    else:
+                        fn_val = float(r.get("nota_final", 0.0)) + n_red_val
+                    fn_item = QTableWidgetItem(f"{fn_val:.2f}")
                 fn_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.tbl_results.setItem(row_idx, curr_c, fn_item)
                 curr_c += 1
@@ -732,8 +807,18 @@ class ReportsTab(QWidget):
                 exam_disc_list = sorted(list(disc_set))
 
             if view_mode in ["geral", "bloco"]:
-                block_set = set(exam_blocks) if exam_blocks else {disc_db_map.get(d.lower()) or "Geral" for d in exam_disc_list}
-                mid_full = sorted(list(block_set))
+                if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+                    ordered_blocks = []
+                    for s in mapped_subjects:
+                        n = s.get("nome", "").strip()
+                        if n and n not in ordered_blocks:
+                            ordered_blocks.append(n)
+                    if not ordered_blocks and exam_blocks:
+                        ordered_blocks = list(exam_blocks)
+                    mid_full = ordered_blocks
+                else:
+                    block_set = set(exam_blocks) if exam_blocks else {disc_db_map.get(d.lower()) or "Geral" for d in exam_disc_list}
+                    mid_full = sorted(list(block_set))
             else:
                 mid_full = exam_disc_list
 
@@ -755,7 +840,7 @@ class ReportsTab(QWidget):
 
             view_mode_labels = {
                 "geral": "Geral (Acertos por Bloco)",
-                "bloco": "Por Bloco (Notas 0 a 10)",
+                "bloco": "Por Bloco (Notas)" if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"] else "Por Bloco (Notas 0 a 10)",
                 "disciplina": "Por Disciplina (Notas 0 a 10)",
                 "disciplina_acertos": "Por Disciplina (Acertos)"
             }
@@ -845,14 +930,19 @@ class ReportsTab(QWidget):
                 
                 if view_mode == "geral":
                     for b_name in mid_full:
-                        b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                        b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or d_k.strip().lower() == b_name.strip().lower() or len(mid_full) == 1))
                         html += f"<td>{b_ac}</td>"
                 elif view_mode == "bloco":
                     for b_name in mid_full:
-                        b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
-                        b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
-                        b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
-                        html += f"<td>{b_nota:.2f}</td>"
+                        b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or d_k.strip().lower() == b_name.strip().lower() or len(mid_full) == 1))
+                        b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or d_k.strip().lower() == b_name.strip().lower() or len(mid_full) == 1))
+                        if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+                            num_q = b_tot if b_tot > 0 else 45
+                            b_nota = int(round((1000.0 / num_q) * b_ac))
+                            html += f"<td>{b_nota}</td>"
+                        else:
+                            b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
+                            html += f"<td>{b_nota:.2f}</td>"
                 else: # view_mode in ["disciplina", "disciplina_acertos"]
                     for d_name in mid_full:
                         if not is_subject_applicable_to_tipo(d_name, mod_str):
@@ -879,23 +969,32 @@ class ReportsTab(QWidget):
                                     html += f"<td>{n_disc:.2f}</td>"
 
                 if view_mode in ["geral", "disciplina_acertos"]:
-                    if view_mode == "geral":
+                    if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+                        html += f"<td>{r['total_acertos']}</td>"
+                    elif view_mode == "geral":
                         html += f"<td>{r['total_acertos']}/{r['total_questoes']}</td>"
                     else:
                         html += f"<td>{r['total_acertos']}</td>"
 
                 if possui_redacao:
                     n_red = r.get("nota_redacao")
-                    n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
+                    if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+                        n_red_str = str(int(round(n_red))) if n_red is not None else "0"
+                    else:
+                        n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
                     html += f"<td>{n_red_str}</td>"
 
                 if (possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]):
-                    n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
-                    if view_mode == "geral":
-                        fn_val = float(r.get("total_acertos", 0)) + n_red_val
+                    if tipo_prova_cat in ["Simulado Enem", "Simulado ENEM"]:
+                        fn_val = float(r.get("nota_final", 0.0))
+                        html += f"<td><b>{int(round(fn_val))}</b></td>"
                     else:
-                        fn_val = float(r.get("nota_final", 0.0)) + n_red_val
-                    html += f"<td><b>{fn_val:.2f}</b></td>"
+                        n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
+                        if view_mode == "geral":
+                            fn_val = float(r.get("total_acertos", 0)) + n_red_val
+                        else:
+                            fn_val = float(r.get("nota_final", 0.0)) + n_red_val
+                        html += f"<td><b>{fn_val:.2f}</b></td>"
 
                 html += "</tr>"
 

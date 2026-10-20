@@ -80,18 +80,22 @@ def get_acronym(full_name: str) -> str:
     return clean_name[:3].upper()
 
 
-def get_header_tooltip(full_name: str, mode: str = "geral") -> str:
+def get_header_tooltip(full_name: str, mode: str = "geral", is_enem: bool = False) -> str:
     """
     Retorna o texto explicativo (tooltip) para o cabeçalho de uma coluna na tabela de relatórios.
     
     :param full_name: Nome completo do bloco ou disciplina (ex: 'Linguagens, Códigos e Suas Tecnologias')
     :param mode: 'geral', 'bloco', 'disciplina' ou 'disciplina_acertos'
+    :param is_enem: Indica se a prova é do tipo Simulado Enem
     """
     sigla = get_acronym(full_name)
     if mode == "geral":
         desc = "Total de acertos do aluno neste bloco"
     elif mode == "bloco":
-        desc = "Nota do bloco calculada proporcionalmente na escala de 0,00 a 10,00"
+        if is_enem:
+            desc = "Nota do bloco calculada na escala de 0 a 1000 pontos"
+        else:
+            desc = "Nota do bloco calculada proporcionalmente na escala de 0,00 a 10,00"
     elif mode == "disciplina_acertos":
         desc = "Número de acertos do aluno nesta disciplina"
     else: # disciplina

@@ -313,13 +313,18 @@ class GabaritoMultiPartDialog(GabaritoTableDialog):
 
 
 class SubjectRangeDialog(QDialog):
-    def __init__(self, available_models: list, subjects_list: list, total_questions: int, partes: list=None, parent=None):
+    def __init__(self, available_models: list, subjects_list: list, total_questions: int, partes: list=None, parent=None, is_block_mode: bool = False, existing_data: dict = None):
         super().__init__(parent)
         self.available_models = available_models
         self.subjects_list = subjects_list
         self.total_questions = total_questions
         self.partes = partes or []
-        self.setWindowTitle("Adicionar Mapeamento de Disciplina por Modelo de Prova")
+        self.is_block_mode = is_block_mode
+        self.existing_data = existing_data or {}
+        
+        mode_label = "Bloco" if is_block_mode else "Disciplina"
+        action_label = "Editar" if existing_data else "Adicionar"
+        self.setWindowTitle(f"{action_label} Mapeamento de {mode_label} por Modelo de Prova")
         self.setWindowIcon(qta.icon('fa5s.layer-group', color='#242D64'))
         self.resize(460, 300)
         self.init_ui()
@@ -331,6 +336,8 @@ class SubjectRangeDialog(QDialog):
         form = QFormLayout()
 
         self.combo_modelo = QComboBox()
+        if self.is_block_mode:
+            self.combo_modelo.addItem("Todos os Modelos", None)
         for m in self.available_models:
             self.combo_modelo.addItem(f"Modelo {m}", m)
 
@@ -356,7 +363,21 @@ class SubjectRangeDialog(QDialog):
         self.spin_peso.setSingleStep(0.0001)
         self.spin_peso.setDecimals(4)
 
-        if self.partes:
+        if self.existing_data:
+            mod_val = self.existing_data.get("modelo") or self.existing_data.get("tipo")
+            idx_mod = self.combo_modelo.findData(mod_val)
+            if idx_mod >= 0:
+                self.combo_modelo.setCurrentIndex(idx_mod)
+
+            s_nome = self.existing_data.get("nome", "")
+            idx_s = self.combo_subject.findText(s_nome)
+            if idx_s >= 0:
+                self.combo_subject.setCurrentIndex(idx_s)
+
+            self.spin_start.setValue(self.existing_data.get("start_q", 1))
+            self.spin_end.setValue(self.existing_data.get("end_q", self.total_questions))
+            self.spin_peso.setValue(float(self.existing_data.get("peso", 1.0)))
+        elif self.partes:
             p0 = self.partes[0]
             self.spin_start.setValue(p0["q_start"])
             self.spin_end.setValue(p0["q_end"])
@@ -367,7 +388,8 @@ class SubjectRangeDialog(QDialog):
         form.addRow("Modelo da Prova *:", self.combo_modelo)
         if self.partes:
             form.addRow("Parte da Prova *:", self.combo_parte)
-        form.addRow("Disciplina *:", self.combo_subject)
+        label_subj = "Bloco *:" if self.is_block_mode else "Disciplina *:"
+        form.addRow(label_subj, self.combo_subject)
         form.addRow("Questão Inicial *:", self.spin_start)
         form.addRow("Questão Final *:", self.spin_end)
         form.addRow("Peso por Questão *:", self.spin_peso)
@@ -380,8 +402,8 @@ class SubjectRangeDialog(QDialog):
         btn_cancel.setObjectName("btnSecondary")
         btn_cancel.clicked.connect(self.reject)
 
-        btn_add = QPushButton("Adicionar")
-        btn_add.setIcon(qta.icon('fa5s.plus', color='white'))
+        btn_add = QPushButton("Salvar" if self.existing_data else "Adicionar")
+        btn_add.setIcon(qta.icon('fa5s.check' if self.existing_data else 'fa5s.plus', color='white'))
         btn_add.setObjectName("btnNavy")
         btn_add.clicked.connect(self.validate_and_accept)
 
@@ -412,8 +434,8 @@ class SubjectRangeDialog(QDialog):
             "modelo": mod_val,
             "tipo": mod_val, # compatibilidade
             "parte_num": p_data["parte_num"] if p_data else 1,
-            "subject_id": s_data["id"],
-            "nome": s_data["nome"],
+            "subject_id": s_data["id"] if s_data else None,
+            "nome": s_data["nome"] if s_data else self.combo_subject.currentText(),
             "start_q": self.spin_start.value(),
             "end_q": self.spin_end.value(),
             "peso": float(self.spin_peso.value())
@@ -468,9 +490,11 @@ class ExamFormDialog(QDialog):
         self.combo_tipo_prova.addItems([
             "Prova Regular",
             "Simulado",
+            "Simulado Enem",
             "Prova de Seleção",
             "Atividade de Rotina"
         ])
+        self.combo_tipo_prova.currentIndexChanged.connect(self.on_tipo_prova_changed)
 
         self.combo_trimestre = QComboBox()
         self.combo_trimestre.addItems([
@@ -480,7 +504,7 @@ class ExamFormDialog(QDialog):
         ])
 
         self.spin_valor = QDoubleSpinBox()
-        self.spin_valor.setRange(1.0, 1000.0)
+        self.spin_valor.setRange(1.0, 10000.0)
         self.spin_valor.setValue(10.0)
         self.spin_valor.setSingleStep(1.0)
 
@@ -530,8 +554,8 @@ class ExamFormDialog(QDialog):
         v_col_left.addWidget(gb_partes)
 
         # Blocos de Disciplinas
-        gb_blocos = QGroupBox("Blocos de Disciplinas da Prova (Opcional)")
-        l_blocos = QVBoxLayout(gb_blocos)
+        self.gb_blocos = QGroupBox("Blocos de Disciplinas da Prova (Opcional)")
+        l_blocos = QVBoxLayout(self.gb_blocos)
 
         h_b_controls = QHBoxLayout()
         self.combo_bloco = QComboBox()
@@ -544,20 +568,32 @@ class ExamFormDialog(QDialog):
         btn_add_bloco.setObjectName("btnNavy")
         btn_add_bloco.clicked.connect(self.add_bloco_to_exam)
 
-        btn_rem_bloco = QPushButton("Remover Bloco Selecionado")
+        btn_up_bloco = QPushButton("Subir")
+        btn_up_bloco.setIcon(qta.icon('fa5s.arrow-up', color='#242D64'))
+        btn_up_bloco.setObjectName("btnSecondary")
+        btn_up_bloco.clicked.connect(self.move_bloco_up)
+
+        btn_down_bloco = QPushButton("Descer")
+        btn_down_bloco.setIcon(qta.icon('fa5s.arrow-down', color='#242D64'))
+        btn_down_bloco.setObjectName("btnSecondary")
+        btn_down_bloco.clicked.connect(self.move_bloco_down)
+
+        btn_rem_bloco = QPushButton("Remover Bloco")
         btn_rem_bloco.setIcon(qta.icon('fa5s.trash-alt', color='#EF4444'))
         btn_rem_bloco.setObjectName("btnSecondary")
         btn_rem_bloco.clicked.connect(self.remove_bloco_from_exam)
 
         h_b_controls.addWidget(self.combo_bloco, 1)
         h_b_controls.addWidget(btn_add_bloco)
+        h_b_controls.addWidget(btn_up_bloco)
+        h_b_controls.addWidget(btn_down_bloco)
         h_b_controls.addWidget(btn_rem_bloco)
         l_blocos.addLayout(h_b_controls)
 
         self.list_blocos = QListWidget()
         self.list_blocos.setMaximumHeight(80)
         l_blocos.addWidget(self.list_blocos)
-        v_col_left.addWidget(gb_blocos)
+        v_col_left.addWidget(self.gb_blocos)
         v_col_left.addStretch()
 
         # Coluna da Direita (Modelos e Gabaritos, Mapeamento)
@@ -593,30 +629,37 @@ class ExamFormDialog(QDialog):
         l_gab.addWidget(self.tbl_gabaritos)
         v_col_right.addWidget(gb_gab)
 
-        # Mapeamento por Disciplinas e Modelo
-        gb_map = QGroupBox("Mapeamento Posicional por Disciplina, Modelo e Parte")
-        l_map = QVBoxLayout(gb_map)
+        # Mapeamento por Disciplinas / Blocos e Modelo
+        self.gb_map = QGroupBox("Mapeamento Posicional por Disciplina, Modelo e Parte")
+        l_map = QVBoxLayout(self.gb_map)
 
         h_m_controls = QHBoxLayout()
-        btn_add_map = QPushButton("Definir Faixa por Disciplina e Modelo")
-        btn_add_map.setIcon(qta.icon('fa5s.layer-group', color='#242D64'))
-        btn_add_map.setObjectName("btnSecondary")
-        btn_add_map.clicked.connect(self.add_subject_mapping)
+        self.btn_add_map = QPushButton("Definir Faixa por Disciplina e Modelo")
+        self.btn_add_map.setIcon(qta.icon('fa5s.layer-group', color='#242D64'))
+        self.btn_add_map.setObjectName("btnSecondary")
+        self.btn_add_map.clicked.connect(self.add_subject_mapping)
+
+        self.btn_edit_map = QPushButton("Editar Faixa")
+        self.btn_edit_map.setIcon(qta.icon('fa5s.edit', color='#242D64'))
+        self.btn_edit_map.setObjectName("btnSecondary")
+        self.btn_edit_map.clicked.connect(self.edit_subject_mapping)
 
         btn_rem_map = QPushButton("Remover Mapeamento Selecionado")
         btn_rem_map.setIcon(qta.icon('fa5s.trash-alt', color='#EF4444'))
         btn_rem_map.setObjectName("btnSecondary")
         btn_rem_map.clicked.connect(self.remove_subject_mapping)
 
-        h_m_controls.addWidget(btn_add_map)
+        h_m_controls.addWidget(self.btn_add_map)
+        h_m_controls.addWidget(self.btn_edit_map)
         h_m_controls.addWidget(btn_rem_map)
         h_m_controls.addStretch()
         l_map.addLayout(h_m_controls)
 
         self.list_map = QListWidget()
         self.list_map.setMaximumHeight(110)
+        self.list_map.itemDoubleClicked.connect(self.edit_subject_mapping)
         l_map.addWidget(self.list_map)
-        v_col_right.addWidget(gb_map)
+        v_col_right.addWidget(self.gb_map)
         v_col_right.addStretch()
 
         h_columns.addLayout(v_col_left, 1)
@@ -697,11 +740,72 @@ class ExamFormDialog(QDialog):
             for p in self.partes_list:
                 self.list_partes.addItem(f"• Parte {p['parte_num']}: {p['nome']} (Questão {p['q_start']} a {p['q_end']} - {p['num_questoes']} Qs)")
 
+    def on_tipo_prova_changed(self):
+        is_enem = (self.combo_tipo_prova.currentText() == "Simulado Enem")
+        if is_enem:
+            self.gb_blocos.setTitle("Blocos de Disciplinas da Prova (Obrigatório no Simulado Enem)")
+            self.gb_map.setTitle("Mapeamento Posicional por Bloco e Modelo")
+            self.btn_add_map.setText("Definir Faixa por Bloco e Modelo")
+            if self.selected_blocos and not self.mapped_subjects:
+                self.auto_align_enem_blocks()
+                self.spin_valor.setValue(1000.0)
+            elif not self.selected_blocos and not self.exam_data:
+                self.spin_valor.setValue(1000.0)
+        else:
+            self.gb_blocos.setTitle("Blocos de Disciplinas da Prova (Opcional)")
+            self.gb_map.setTitle("Mapeamento Posicional por Disciplina, Modelo e Parte")
+            self.btn_add_map.setText("Definir Faixa por Disciplina e Modelo")
+
+    def auto_align_enem_blocks(self):
+        """
+        Alinhamento posicional automático exclusivo do Simulado ENEM:
+        - Ordena por blocos na ordem definida pelo usuário.
+        - Bloco 1: Q1 a Q45
+        - Bloco 2: Q46 a Q90
+        - Bloco N: Q( (N-1)*45 + 1 ) a Q( N*45 )
+        """
+        self.mapped_subjects = []
+        for i, b in enumerate(self.selected_blocos):
+            start_q = i * 45 + 1
+            end_q = (i + 1) * 45
+            self.mapped_subjects.append({
+                "modelo": None,
+                "tipo": None,
+                "parte_num": 1,
+                "subject_id": b["id"],
+                "nome": b["nome"],
+                "start_q": start_q,
+                "end_q": end_q,
+                "peso": 1.0
+            })
+        self.refresh_mapped_subjects_list()
+        self.spin_valor.setValue(1000.0)
+
+    def move_bloco_up(self):
+        row = self.list_blocos.currentRow()
+        if row > 0:
+            self.selected_blocos[row - 1], self.selected_blocos[row] = self.selected_blocos[row], self.selected_blocos[row - 1]
+            self.refresh_blocos_list()
+            self.list_blocos.setCurrentRow(row - 1)
+            if self.combo_tipo_prova.currentText() == "Simulado Enem":
+                self.auto_align_enem_blocks()
+
+    def move_bloco_down(self):
+        row = self.list_blocos.currentRow()
+        if row >= 0 and row < len(self.selected_blocos) - 1:
+            self.selected_blocos[row + 1], self.selected_blocos[row] = self.selected_blocos[row], self.selected_blocos[row + 1]
+            self.refresh_blocos_list()
+            self.list_blocos.setCurrentRow(row + 1)
+            if self.combo_tipo_prova.currentText() == "Simulado Enem":
+                self.auto_align_enem_blocks()
+
     def get_effective_partes(self):
         if self.partes_list:
             return self.partes_list
         total_q = 45
-        if self.gabaritos_map:
+        if self.combo_tipo_prova.currentText() == "Simulado Enem" and self.selected_blocos:
+            total_q = len(self.selected_blocos) * 45
+        elif self.gabaritos_map:
             total_q = len(next(iter(self.gabaritos_map.values())))
         return [{
             "parte_num": 1,
@@ -724,11 +828,18 @@ class ExamFormDialog(QDialog):
         self.selected_blocos.append(bloco)
         self.refresh_blocos_list()
 
+        if self.combo_tipo_prova.currentText() == "Simulado Enem":
+            self.auto_align_enem_blocks()
+            self.spin_valor.setValue(1000.0)
+
     def remove_bloco_from_exam(self):
         row = self.list_blocos.currentRow()
         if row >= 0 and row < len(self.selected_blocos):
             del self.selected_blocos[row]
             self.refresh_blocos_list()
+            if self.combo_tipo_prova.currentText() == "Simulado Enem":
+                self.auto_align_enem_blocks()
+                self.spin_valor.setValue(max(1000.0, len(self.selected_blocos) * 1000.0))
 
     def refresh_blocos_list(self):
         self.list_blocos.clear()
@@ -796,22 +907,56 @@ class ExamFormDialog(QDialog):
             self.tbl_gabaritos.setCellWidget(row_idx, 2, w_actions)
 
     def add_subject_mapping(self):
-        if not self.gabaritos_map:
+        is_enem = (self.combo_tipo_prova.currentText() == "Simulado Enem")
+        if not is_enem and not self.gabaritos_map:
             QMessageBox.warning(self, "Aviso", "Cadastre ao menos um modelo de gabarito antes de mapear disciplinas.")
             return
 
         available_models = list(self.gabaritos_map.keys())
-        num_q = len(next(iter(self.gabaritos_map.values())))
-        all_subjects = self.subject_model.list_subjects()
-        if not all_subjects:
-            QMessageBox.warning(self, "Aviso", "Nenhuma disciplina cadastrada no sistema. Cadastre disciplinas na aba 'Disciplinas e Blocos'.")
-            return
+        num_q = len(next(iter(self.gabaritos_map.values()))) if self.gabaritos_map else (len(self.selected_blocos) * 45 or 45)
+
+        if is_enem:
+            subjects_list = self.selected_blocos if self.selected_blocos else self.subject_model.list_blocks()
+            if not subjects_list:
+                QMessageBox.warning(self, "Aviso", "Nenhum bloco cadastrado na prova. Adicione blocos primeiro.")
+                return
+        else:
+            subjects_list = self.subject_model.list_subjects()
+            if not subjects_list:
+                QMessageBox.warning(self, "Aviso", "Nenhuma disciplina cadastrada no sistema. Cadastre disciplinas na aba 'Disciplinas e Blocos'.")
+                return
 
         partes = self.get_effective_partes()
-        dlg = SubjectRangeDialog(available_models, all_subjects, num_q, partes, self)
+        dlg = SubjectRangeDialog(available_models, subjects_list, num_q, partes, self, is_block_mode=is_enem)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             data = dlg.get_data()
             self.mapped_subjects.append(data)
+            self.refresh_mapped_subjects_list()
+
+    def edit_subject_mapping(self):
+        row = self.list_map.currentRow()
+        if row < 0 or row >= len(self.mapped_subjects):
+            QMessageBox.warning(self, "Aviso", "Selecione um mapeamento na lista para editar.")
+            return
+
+        m_data = self.mapped_subjects[row]
+        is_enem = (self.combo_tipo_prova.currentText() == "Simulado Enem")
+        available_models = list(self.gabaritos_map.keys())
+        num_q = len(next(iter(self.gabaritos_map.values()))) if self.gabaritos_map else (len(self.selected_blocos) * 45 or 45)
+
+        if is_enem:
+            subjects_list = self.selected_blocos if self.selected_blocos else self.subject_model.list_blocks()
+        else:
+            subjects_list = self.subject_model.list_subjects()
+
+        partes = self.get_effective_partes()
+        dlg = SubjectRangeDialog(
+            available_models, subjects_list, num_q, partes, self,
+            is_block_mode=is_enem, existing_data=m_data
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            new_data = dlg.get_data()
+            self.mapped_subjects[row] = new_data
             self.refresh_mapped_subjects_list()
 
     def remove_subject_mapping(self):
@@ -846,6 +991,13 @@ class ExamFormDialog(QDialog):
         if not self.gabaritos_map:
             QMessageBox.warning(self, "Gabarito Obrigatório", "A prova precisa ter ao menos um modelo de gabarito cadastrado.")
             return
+
+        if tipo_prova == "Simulado Enem":
+            if not self.selected_blocos:
+                QMessageBox.warning(self, "Bloco Obrigatório", "Provas do tipo Simulado Enem devem possuir ao menos um bloco de disciplinas cadastrado.")
+                return
+            if not self.mapped_subjects:
+                self.auto_align_enem_blocks()
 
         partes = self.get_effective_partes()
         layout_config = {

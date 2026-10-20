@@ -120,6 +120,7 @@ class ReportExporter:
         possui_redacao = bool(exam.get("possui_redacao", False))
         
         tipo_cat = exam.get("tipo_prova", "Prova Regular")
+        is_enem = (tipo_cat in ["Simulado Enem", "Simulado ENEM"])
         is_landscape = (tipo_cat == "Simulado")
         pagesize = landscape(A4) if is_landscape else A4
 
@@ -220,7 +221,7 @@ class ReportExporter:
         # ${modo_de_visualizacao} | Alunos processados: ${qtd_alunos}
         view_mode_labels = {
             "geral": "Geral (Acertos por Bloco)",
-            "bloco": "Por Bloco (Notas 0 a 10)",
+            "bloco": "Por Bloco (Notas)" if is_enem else "Por Bloco (Notas 0 a 10)",
             "disciplina": "Por Disciplina (Notas 0 a 10)",
             "disciplina_acertos": "Por Disciplina (Acertos)"
         }
@@ -249,8 +250,18 @@ class ReportExporter:
             exam_disc_list = sorted(list(disc_set))
 
         if view_mode in ["geral", "bloco"]:
-            block_set = set(exam_blocks) if exam_blocks else {disc_db_map.get(d.lower()) or "Geral" for d in exam_disc_list}
-            mid_full = sorted(list(block_set))
+            if is_enem:
+                ordered_blocks = []
+                for s in mapped_subjects:
+                    n = s.get("nome", "").strip()
+                    if n and n not in ordered_blocks:
+                        ordered_blocks.append(n)
+                if not ordered_blocks and exam_blocks:
+                    ordered_blocks = list(exam_blocks)
+                mid_full = ordered_blocks
+            else:
+                block_set = set(exam_blocks) if exam_blocks else {disc_db_map.get(d.lower()) or "Geral" for d in exam_disc_list}
+                mid_full = sorted(list(block_set))
             group_title = "Acertos" if view_mode == "geral" else "Notas"
         else:
             mid_full = exam_disc_list
@@ -267,7 +278,6 @@ class ReportExporter:
         story.append(Spacer(1, 10))
 
         # Determinar rótulos das colunas do meio (disciplinas/blocos)
-        tipo_cat = exam.get("tipo_prova", "Prova Regular")
         if view_mode in ["disciplina", "disciplina_acertos"] and tipo_cat == "Prova Regular" and len(mid_full) <= 3:
             mid_labels = mid_full
         else:
@@ -316,15 +326,20 @@ class ReportExporter:
 
             if view_mode == "geral":
                 for b_name in mid_full:
-                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or d_k.strip().lower() == b_name.strip().lower() or len(mid_full) == 1))
                     row.append(Paragraph(str(b_ac), table_cell_style))
 
             elif view_mode == "bloco":
                 for b_name in mid_full:
-                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
-                    b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
-                    b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
-                    row.append(Paragraph(f"{b_nota:.2f}", table_cell_style))
+                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or d_k.strip().lower() == b_name.strip().lower() or len(mid_full) == 1))
+                    b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or d_k.strip().lower() == b_name.strip().lower() or len(mid_full) == 1))
+                    if is_enem:
+                        num_q = b_tot if b_tot > 0 else 45
+                        b_nota = int(round((1000.0 / num_q) * b_ac))
+                        row.append(Paragraph(str(b_nota), table_cell_style))
+                    else:
+                        b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
+                        row.append(Paragraph(f"{b_nota:.2f}", table_cell_style))
 
             else: # view_mode in ["disciplina", "disciplina_acertos"]
                 for d_name in mid_full:
@@ -352,19 +367,32 @@ class ReportExporter:
                                 row.append(Paragraph(f"{n_disc:.2f}", table_cell_style))
 
             if view_mode == "geral":
-                row.append(Paragraph(f"{r.get('total_acertos', 0)}/{r.get('total_questoes', 0)}", table_cell_style))
+                if is_enem:
+                    row.append(Paragraph(str(r.get('total_acertos', 0)), table_cell_style))
+                else:
+                    row.append(Paragraph(f"{r.get('total_acertos', 0)}/{r.get('total_questoes', 0)}", table_cell_style))
             elif view_mode == "disciplina_acertos":
                 row.append(Paragraph(str(r.get('total_acertos', 0)), table_cell_style))
 
             if possui_redacao:
                 n_red = r.get("nota_redacao")
-                n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
+                if is_enem:
+                    n_red_str = str(int(round(n_red))) if n_red is not None else "0"
+                else:
+                    n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
                 row.append(Paragraph(n_red_str, table_cell_style))
 
             if possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]:
-                n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
-                fn_val = float(r.get("total_acertos", 0)) + n_red_val
-                row.append(Paragraph(f"<b>{fn_val:.2f}</b>", table_cell_style))
+                if is_enem:
+                    fn_val = float(r.get("nota_final", 0.0))
+                    row.append(Paragraph(f"<b>{int(round(fn_val))}</b>", table_cell_style))
+                else:
+                    n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
+                    if view_mode == "geral":
+                        fn_val = float(r.get("total_acertos", 0)) + n_red_val
+                    else:
+                        fn_val = float(r.get("nota_final", 0.0)) + n_red_val
+                    row.append(Paragraph(f"<b>{fn_val:.2f}</b>", table_cell_style))
 
             table_data.append(row)
 
@@ -463,6 +491,9 @@ class ReportExporter:
         pct_ac = result.get('percentual_acertos', 0.0) if result else 0.0
         tot_ac = result.get('total_acertos', 0) if result else 0
         tot_q = result.get('total_questoes', 0) if result else 0
+        is_enem = (exam_info.get("tipo_prova") in ["Simulado Enem", "Simulado ENEM"]) if exam_info else False
+
+        nota_final_display = f"{int(round(n_final))} / {int(round(v_tot))}" if is_enem else f"{n_final:.2f} / {v_tot}"
 
         info_data = [
             [
@@ -474,7 +505,7 @@ class ReportExporter:
                 Paragraph(f"<b>Tipo da Prova:</b> {result.get('tipo_prova', 'N/A') if result else 'N/A'}", body_style)
             ],
             [
-                Paragraph(f"<b>Nota Final da Prova:</b> <font size=11 color='#00A9A4'><b>{n_final:.2f}</b> / {v_tot}</font>", body_style),
+                Paragraph(f"<b>Nota Final da Prova:</b> <font size=11 color='#00A9A4'><b>{nota_final_display}</b></font>", body_style),
                 Paragraph(f"<b>Aproveitamento Geral:</b> {pct_ac:.1f}% ({tot_ac}/{tot_q} acertos)", body_style)
             ]
         ]
@@ -488,11 +519,14 @@ class ReportExporter:
         story.append(info_table)
         story.append(Spacer(1, 12))
 
-        # Detalhamento por Disciplina
-        story.append(Paragraph("<b>Desempenho por Disciplina (Nota de 0 a 10 por disciplina)</b>", title_style))
+        # Detalhamento por Disciplina / Bloco
+        sec_title = "<b>Desempenho por Bloco (Escala de 0 a 1000 por bloco)</b>" if is_enem else "<b>Desempenho por Disciplina (Nota de 0 a 10 por disciplina)</b>"
+        story.append(Paragraph(sec_title, title_style))
         story.append(Spacer(1, 6))
 
-        disc_headers = ["Disciplina", "Acertos", "Total Questões", "% Acertos", "Nota Disciplina"]
+        first_col_title = "Bloco" if is_enem else "Disciplina"
+        last_col_title = "Nota Bloco" if is_enem else "Nota Disciplina"
+        disc_headers = [first_col_title, "Acertos", "Total Questões", "% Acertos", last_col_title]
         disc_table_data = [[Paragraph(h, header_style) for h in disc_headers]]
 
         detalhes = result.get("detalhes_disciplinas", {}) if result else {}
@@ -502,13 +536,19 @@ class ReportExporter:
             ac = disc_data.get("acertos", 0)
             tot = disc_data.get("total", 0)
             pct = disc_data.get("percentual", 0.0)
-            n_disc = (ac / tot * 10.0) if tot > 0 else disc_data.get("nota", 0.0)
+            if is_enem:
+                num_q = tot if tot > 0 else 45
+                b_nota = int(round((1000.0 / num_q) * ac))
+                n_disc_str = str(b_nota)
+            else:
+                n_disc = (ac / tot * 10.0) if tot > 0 else disc_data.get("nota", 0.0)
+                n_disc_str = f"{n_disc:.2f}"
             disc_table_data.append([
                 Paragraph(disc_name, body_style),
                 Paragraph(str(ac), body_style),
                 Paragraph(str(tot), body_style),
                 Paragraph(f"{pct:.1f}%", body_style),
-                Paragraph(f"<b>{n_disc:.2f}</b>", body_style)
+                Paragraph(f"<b>{n_disc_str}</b>", body_style)
             ])
 
         if len(disc_table_data) > 1:
@@ -644,6 +684,7 @@ class ReportExporter:
         ws = wb.active
         ws.title = "Resultados"
         tipo_cat = exam.get("tipo_prova", "Prova Regular")
+        is_enem = (tipo_cat in ["Simulado Enem", "Simulado ENEM"])
         if tipo_cat == "Simulado":
             ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
         else:
@@ -666,7 +707,7 @@ class ReportExporter:
 
         view_mode_labels = {
             "geral": "Geral (Acertos por Bloco)",
-            "bloco": "Por Bloco (Notas 0 a 10)",
+            "bloco": "Por Bloco (Notas)" if is_enem else "Por Bloco (Notas 0 a 10)",
             "disciplina": "Por Disciplina (Notas 0 a 10)",
             "disciplina_acertos": "Por Disciplina (Acertos)"
         }
@@ -699,14 +740,23 @@ class ReportExporter:
             exam_disc_list = sorted(list(disc_set))
 
         if view_mode in ["geral", "bloco"]:
-            block_set = set(exam_blocks) if exam_blocks else {disc_db_map.get(d.lower()) or "Geral" for d in exam_disc_list}
-            mid_full = sorted(list(block_set))
+            if is_enem:
+                ordered_blocks = []
+                for s in mapped_subjects:
+                    n = s.get("nome", "").strip()
+                    if n and n not in ordered_blocks:
+                        ordered_blocks.append(n)
+                if not ordered_blocks and exam_blocks:
+                    ordered_blocks = list(exam_blocks)
+                mid_full = ordered_blocks
+            else:
+                block_set = set(exam_blocks) if exam_blocks else {disc_db_map.get(d.lower()) or "Geral" for d in exam_disc_list}
+                mid_full = sorted(list(block_set))
             group_title = "Acertos" if view_mode == "geral" else "Notas"
         else:
             mid_full = exam_disc_list
             group_title = "Acertos" if view_mode == "disciplina_acertos" else "Notas"
 
-        tipo_cat = exam.get("tipo_prova", "Prova Regular")
         if view_mode in ["disciplina", "disciplina_acertos"] and tipo_cat == "Prova Regular" and len(mid_full) <= 3:
             mid_labels = mid_full
         else:
@@ -714,10 +764,8 @@ class ReportExporter:
 
         base_left = ["", "Matrícula", "Aluno", "Turma", "Modelo"]
         base_right = []
-        if view_mode == "geral":
-            base_right.append("Total Acertos")
-        elif view_mode == "disciplina_acertos":
-            base_right.append("Total")
+        if view_mode in ["geral", "disciplina_acertos"]:
+            base_right.append("Total" if is_enem else "Total Acertos")
 
         if possui_redacao:
             red_title = "RED" if view_mode == "disciplina" else "Redação"
@@ -772,16 +820,21 @@ class ReportExporter:
 
             if view_mode == "geral":
                 for b_name in mid_full:
-                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or d_k.strip().lower() == b_name.strip().lower() or len(mid_full) == 1))
                     row_data.append(b_ac)
                 row_data.append(r.get("total_acertos", 0))
 
             elif view_mode == "bloco":
                 for b_name in mid_full:
-                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
-                    b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
-                    b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
-                    row_data.append(round(b_nota, 2))
+                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or d_k.strip().lower() == b_name.strip().lower() or len(mid_full) == 1))
+                    b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or d_k.strip().lower() == b_name.strip().lower() or len(mid_full) == 1))
+                    if is_enem:
+                        num_q = b_tot if b_tot > 0 else 45
+                        b_nota = int(round((1000.0 / num_q) * b_ac))
+                        row_data.append(b_nota)
+                    else:
+                        b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
+                        row_data.append(round(b_nota, 2))
 
             elif view_mode == "disciplina_acertos":
                 for d_name in mid_full:
@@ -823,12 +876,22 @@ class ReportExporter:
 
             if possui_redacao:
                 n_red = r.get("nota_redacao")
-                row_data.append(round(n_red, 2) if n_red is not None else 0.0)
+                if is_enem:
+                    row_data.append(int(round(n_red)) if n_red is not None else 0)
+                else:
+                    row_data.append(round(n_red, 2) if n_red is not None else 0.0)
 
             if possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]:
-                n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
-                fn_val = float(r.get("total_acertos", 0)) + n_red_val
-                row_data.append(round(fn_val, 2))
+                if is_enem:
+                    fn_val = float(r.get("nota_final", 0.0))
+                    row_data.append(int(round(fn_val)))
+                else:
+                    n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
+                    if view_mode == "geral":
+                        fn_val = float(r.get("total_acertos", 0)) + n_red_val
+                    else:
+                        fn_val = float(r.get("nota_final", 0.0)) + n_red_val
+                    row_data.append(round(fn_val, 2))
 
             ws.append(row_data)
             current_row = ws.max_row
@@ -840,6 +903,8 @@ class ReportExporter:
                 if col_idx >= 6:
                     if isinstance(val, float):
                         c.number_format = "0.00"
+                    elif isinstance(val, int):
+                        c.number_format = "0"
                     c.alignment = center_align
                 elif col_idx in [1, 2, 4, 5]:
                     c.alignment = center_align
@@ -865,6 +930,7 @@ class ReportExporter:
         doc = docx.Document()
         section = doc.sections[0]
         tipo_cat = exam.get("tipo_prova", "Prova Regular")
+        is_enem = (tipo_cat in ["Simulado Enem", "Simulado ENEM"])
         if tipo_cat == "Simulado":
             section.orientation = WD_ORIENT.LANDSCAPE
             new_w, new_h = section.page_height, section.page_width
@@ -877,7 +943,7 @@ class ReportExporter:
 
         view_mode_labels = {
             "geral": "Geral (Acertos por Bloco)",
-            "bloco": "Por Bloco (Notas 0 a 10)",
+            "bloco": "Por Bloco (Notas)" if is_enem else "Por Bloco (Notas 0 a 10)",
             "disciplina": "Por Disciplina (Notas 0 a 10)",
             "disciplina_acertos": "Por Disciplina (Acertos)"
         }
@@ -914,8 +980,18 @@ class ReportExporter:
             exam_disc_list = sorted(list(disc_set))
 
         if view_mode in ["geral", "bloco"]:
-            block_set = set(exam_blocks) if exam_blocks else {disc_db_map.get(d.lower()) or "Geral" for d in exam_disc_list}
-            mid_full = sorted(list(block_set))
+            if is_enem:
+                ordered_blocks = []
+                for s in mapped_subjects:
+                    n = s.get("nome", "").strip()
+                    if n and n not in ordered_blocks:
+                        ordered_blocks.append(n)
+                if not ordered_blocks and exam_blocks:
+                    ordered_blocks = list(exam_blocks)
+                mid_full = ordered_blocks
+            else:
+                block_set = set(exam_blocks) if exam_blocks else {disc_db_map.get(d.lower()) or "Geral" for d in exam_disc_list}
+                mid_full = sorted(list(block_set))
         else:
             mid_full = exam_disc_list
 
@@ -930,17 +1006,14 @@ class ReportExporter:
 
         doc.add_paragraph().paragraph_format.space_after = Pt(10)
 
-        tipo_cat = exam.get("tipo_prova", "Prova Regular")
         if view_mode in ["disciplina", "disciplina_acertos"] and tipo_cat == "Prova Regular" and len(mid_full) <= 3:
             mid_labels = mid_full
         else:
             mid_labels = [get_acronym(m) for m in mid_full]
 
         right_headers = []
-        if view_mode == "geral":
-            right_headers.append("Total Acertos")
-        elif view_mode == "disciplina_acertos":
-            right_headers.append("Total")
+        if view_mode in ["geral", "disciplina_acertos"]:
+            right_headers.append("Total" if is_enem else "Total Acertos")
 
         if possui_redacao:
             red_title = "RED" if view_mode == "disciplina" else "Redação"
@@ -973,18 +1046,26 @@ class ReportExporter:
             col_idx = 5
             if view_mode == "geral":
                 for b_name in mid_full:
-                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
+                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or d_k.strip().lower() == b_name.strip().lower() or len(mid_full) == 1))
                     row_cells[col_idx].text = str(b_ac)
                     col_idx += 1
-                row_cells[col_idx].text = f"{r.get('total_acertos', 0)}/{r.get('total_questoes', 0)}"
+                if is_enem:
+                    row_cells[col_idx].text = str(r.get('total_acertos', 0))
+                else:
+                    row_cells[col_idx].text = f"{r.get('total_acertos', 0)}/{r.get('total_questoes', 0)}"
                 col_idx += 1
 
             elif view_mode == "bloco":
                 for b_name in mid_full:
-                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
-                    b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or len(mid_full) == 1))
-                    b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
-                    row_cells[col_idx].text = f"{b_nota:.2f}"
+                    b_ac = sum(d_v.get("acertos", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or d_k.strip().lower() == b_name.strip().lower() or len(mid_full) == 1))
+                    b_tot = sum(d_v.get("total", 0) for d_k, d_v in det.items() if d_k.strip().lower() != "geral" and (disc_db_map.get(d_k.strip().lower()) == b_name or d_k.strip().lower() == b_name.strip().lower() or len(mid_full) == 1))
+                    if is_enem:
+                        num_q = b_tot if b_tot > 0 else 45
+                        b_nota = int(round((1000.0 / num_q) * b_ac))
+                        row_cells[col_idx].text = str(b_nota)
+                    else:
+                        b_nota = (b_ac / b_tot * 10.0) if b_tot > 0 else 0.0
+                        row_cells[col_idx].text = f"{b_nota:.2f}"
                     col_idx += 1
 
             elif view_mode == "disciplina_acertos":
@@ -1031,13 +1112,23 @@ class ReportExporter:
 
             if possui_redacao:
                 n_red = r.get("nota_redacao")
-                n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
+                if is_enem:
+                    n_red_str = str(int(round(n_red))) if n_red is not None else "0"
+                else:
+                    n_red_str = f"{n_red:.2f}" if n_red is not None else "0.00"
                 row_cells[col_idx].text = n_red_str
                 col_idx += 1
 
             if possui_redacao or view_mode not in ["geral", "disciplina", "disciplina_acertos"]:
-                n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
-                fn_val = float(r.get("total_acertos", 0)) + n_red_val
-                row_cells[col_idx].text = f"{fn_val:.2f}"
+                if is_enem:
+                    fn_val = float(r.get("nota_final", 0.0))
+                    row_cells[col_idx].text = str(int(round(fn_val)))
+                else:
+                    n_red_val = r.get("nota_redacao") or 0.0 if possui_redacao else 0.0
+                    if view_mode == "geral":
+                        fn_val = float(r.get("total_acertos", 0)) + n_red_val
+                    else:
+                        fn_val = float(r.get("nota_final", 0.0)) + n_red_val
+                    row_cells[col_idx].text = f"{fn_val:.2f}"
 
         doc.save(output_path)

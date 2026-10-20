@@ -220,11 +220,13 @@ class GradingEngine:
             v_disc_target = disc_orig_total.get(d_name, d_data["soma_pesos_totais"])
 
             if tot_act > 0 and ac_act == tot_act:
-                # 100% acertos na disciplina: nota máxima exata
+                # 100% acertos na disciplina/bloco: nota máxima exata
                 d_data["soma_pesos_acertos"] = v_disc_target
                 d_data["percentual"] = 100.0
                 if self.tipo_prova_categoria == "Prova Regular":
                     d_data["nota"] = round(v_disc_target, 1)
+                elif self.tipo_prova_categoria in ["Simulado Enem", "Simulado ENEM"]:
+                    d_data["nota"] = 1000
                 else:
                     d_data["nota"] = 10.0
             else:
@@ -232,6 +234,9 @@ class GradingEngine:
                 d_data["percentual"] = round(pct, 2)
                 if self.tipo_prova_categoria == "Prova Regular":
                     d_data["nota"] = round(d_data["soma_pesos_acertos"], 1)
+                elif self.tipo_prova_categoria in ["Simulado Enem", "Simulado ENEM"]:
+                    num_q = tot_act if tot_act > 0 else 45
+                    d_data["nota"] = int(round((1000.0 / num_q) * ac_act))
                 else:
                     d_data["nota"] = round((d_data["soma_pesos_acertos"] / d_data["soma_pesos_totais"] * 10.0), 2) if d_data["soma_pesos_totais"] > 0 else 0.0
 
@@ -245,13 +250,19 @@ class GradingEngine:
         # Se acertou 100% de todas as questões ativas da prova -> 100% automático na Nota Final
         if total_questoes_ativas > 0 and total_acertos == total_questoes_ativas:
             percentual_acertos = 100.0
-            if self.tipo_prova_categoria == "Prova Regular":
+            if self.tipo_prova_categoria in ["Simulado Enem", "Simulado ENEM"]:
+                notas_blocos = [d["nota"] for k, d in detalhes_disciplinas.items() if k.strip().lower() != "geral"]
+                nota_final = int(round(sum(notas_blocos) / len(notas_blocos))) if notas_blocos else 1000
+            elif self.tipo_prova_categoria == "Prova Regular":
                 nota_final = sum(d["nota"] for d in detalhes_disciplinas.values())
             else:
                 nota_final = self.valor_total
         else:
             percentual_acertos = (soma_pesos_acertos / soma_pesos_totais * 100.0) if soma_pesos_totais > 0 else 0.0
-            if self.tipo_prova_categoria == "Prova Regular":
+            if self.tipo_prova_categoria in ["Simulado Enem", "Simulado ENEM"]:
+                notas_blocos = [d["nota"] for k, d in detalhes_disciplinas.items() if k.strip().lower() != "geral"]
+                nota_final = int(round(sum(notas_blocos) / len(notas_blocos))) if notas_blocos else 0
+            elif self.tipo_prova_categoria == "Prova Regular":
                 nota_final = sum(d["nota"] for d in detalhes_disciplinas.values())
             else:
                 nota_final = (soma_pesos_acertos / soma_pesos_totais * self.valor_total) if soma_pesos_totais > 0 else 0.0

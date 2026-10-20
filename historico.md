@@ -225,6 +225,32 @@ Nesta fase final de polimento, foram adicionados recursos de apoio à nota de re
 - **Validação com Testes de Unidade**:
   - Adicionado o teste `test_get_student_exam_history_and_performance_stats` em `tests/test_student_crud.py`. Suíte completa de 35 testes aprovada (`35/35 passed`).
 
+### 3.15 Novo Tipo de Prova: Simulado ENEM e Alinhamento Posicional Automático por Blocos (2026-10-20)
+- **Novo Tipo de Prova (`"Simulado Enem"`)**:
+  - Adicionado no seletor `combo_tipo_prova` em `ui/tabs/exams_tab.py` junto aos tipos existentes.
+  - Exclusividade do modelo: avaliado exclusivamente por blocos (sem divisão por disciplinas comuns), com cada bloco valendo 1000 pontos e composto por 45 questões.
+  - Suporte opcional a redação (`possui_redacao`).
+- **Alinhamento Posicional Automático e Editável**:
+  - Método `auto_align_enem_blocks` em `ExamFormDialog`: ao adicionar ou reordenar blocos, as faixas de questões são atribuídas automaticamente em sequência (ex.: Bloco 1: Q1–45, Bloco 2: Q46–90, Bloco 3: Q91–135, etc.).
+  - Adicionados botões "Subir" (`move_bloco_up`) e "Descer" (`move_bloco_down`) para permitir que o usuário defina a ordem exata dos blocos.
+  - Adicionado botão "Editar Faixa" e duplo clique no mapeamento para edição fina via `SubjectRangeDialog` (com modo `is_block_mode=True` exibindo rótulos voltados a blocos).
+  - Atualização automática do valor total da prova (`spin_valor`) proporcional ao número de blocos (`qtd_blocos * 1000.0`, com limite ampliado para 10000.0).
+- **Cálculo da Nota dos Blocos e Nota Final Consolidada (`GradingEngine`)**:
+  - Fórmula exclusiva do Simulado ENEM: `nota_bloco = round((1000 / 45) * acertos)` convertida para número inteiro.
+  - Acerto de 100% das questões ativas de um bloco resulta exatamente em 1000 pontos.
+  - **Nota Final Consolidada**: É a média aritmética das notas dos blocos arredondada para um número inteiro (`round(sum(notas_blocos) / len(notas_blocos))`), **desconsiderando a Redação**.
+  - A nota de **Redação** é exibida e exportada como um **valor separado** no relatório final, sem ser somada à Nota Final consolidada.
+  - Todas as outras categorias de prova mantêm intactas as suas fórmulas anteriores de notas de 0 a 10 ou pesos por questão.
+- **Restrição de Relatórios e Exibição de Notas Inteiras (`ReportsTab` e `ReportExporter`)**:
+  - O seletor de modo de visualização na aba de Relatórios (`reports_tab.py`) restringe as opções exclusivamente para:
+    - `"Por Bloco (Notas)"` (`"bloco"`)
+    - `"Geral (Acertos por Bloco)"` (`"geral"`)
+  - A ordenação das colunas de blocos obedece rigorosamente à sequência definida pelo usuário em `mapped_subjects` (ao invés de ordenação alfabética padrão).
+  - As notas dos blocos, total de acertos, nota da redação e nota final são exibidas e exportadas como números inteiros nos relatórios de Simulado ENEM (GUI, Impressão Direta A4, PDF, Excel e Word).
+- **Validação com Testes de Unidade**:
+  - Criado `tests/test_simulado_enem.py` cobrindo o motor de cálculo, alinhamento automático de blocos no formulário, restrição de visualização em relatórios e integridade das exportações (PDF, Excel, Word).
+  - Suíte completa de testes aprovada: 39 testes (`39/39 passed`).
+
 ---
 
 ## 🤖 Orientações para Agentes de IA Futuros
@@ -241,6 +267,6 @@ Ao estender ou modificar esta codebase, mantenha as seguintes premissas:
 
 3. **Validação de Testes**:
    - Toda alteração nas colunas da tabela GUI exige a atualização dos índices verificados em `tests/test_report_view_modes.py`.
-   - Execute sempre `python -m pytest` para validar que todas as suítes permanecem aprovadas (35/35).
+   - Execute sempre `python -m pytest` para validar que todas as suítes permanecem aprovadas (39/39).
 
 
